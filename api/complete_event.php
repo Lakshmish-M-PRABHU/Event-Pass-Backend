@@ -60,6 +60,15 @@ $stmt = $eventDB->prepare("
 ");
 $stmt->execute([$notes, $eventId]);
 
+$stmt = $collegeDB->prepare("SELECT faculty_id FROM student_tg_mapping WHERE student_id = ?");
+$stmt->execute([$studentId]);
+$tg = $stmt->fetch(PDO::FETCH_ASSOC);
+if ($tg) {
+    $completionSummary = "Event completed. Details: " . json_encode($data); // Summarize form data
+    $stmt = $eventDB->prepare("INSERT INTO notifications (faculty_id, event_id, title, message, type) VALUES (?, ?, 'Event Completed', ?, 'completion')");
+    $stmt->execute([$tg['faculty_id'], $eventId, $completionSummary]);
+}
+
 // (Optional) notify TG + Coordinator here
 
 echo json_encode([

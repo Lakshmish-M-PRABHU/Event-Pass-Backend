@@ -56,7 +56,7 @@ if (
 }
 
 $stmt = $eventDB->prepare("
-    SELECT id FROM event_completions WHERE event_id = ?
+    SELECT completion_id FROM event_completions WHERE event_id = ?
 ");
 $stmt->execute([$eventId]);
 

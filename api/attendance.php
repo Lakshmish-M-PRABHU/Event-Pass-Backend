@@ -12,6 +12,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 session_start();
 require "../config/events_db.php";
+require "../config/college_db.php";
 
 $studentId = $_SESSION['student_id'] ?? null;
 if (!$studentId) {
@@ -46,34 +47,24 @@ if (!$updated) {
     echo json_encode(["error" => "Failed to update attendance"]);
     exit;
 }
-
-/* 2️⃣ Find TG for this student */
-$stmt = $eventDB->prepare("
-    SELECT faculty_id 
-    FROM student_tg 
-    WHERE student_id = ?
-");
-$stmt->execute([$studentId]);
-$tg = $stmt->fetch(PDO::FETCH_ASSOC);
-
-if ($tg) {
-    $facultyId = $tg['faculty_id'];
-
-    $title = $attended
-        ? "Attendance Confirmed"
-        : "Attendance Rejected";
-
-    $message = $attended
-        ? "Student confirmed attendance for Event ID $eventId."
-        : "Student marked NOT attended for Event ID $eventId.";
-
-    /* 3️⃣ Insert notification */
-    $stmt = $eventDB->prepare("
-        INSERT INTO notifications 
-        (faculty_id, event_id, title, message, type)
-        VALUES (?, ?, ?, ?, 'attendance')
-    ");
-    $stmt->execute([$facultyId, $eventId, $title, $message]);
+if ($newStatus === 'approved' && $isFullyApproved) {
+    // Find TG for the student
+    $stmt = $collegeDB->prepare("SELECT faculty_id FROM student_tg_mapping WHERE student_id = ?");
+    $stmt->execute([$event['student_id']]);
+    $tg = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($tg) {
+        $stmt = $eventDB->prepare("INSERT INTO notifications (faculty_id, event_id, title, message, type) VALUES (?, ?, 'Event Approved', 'Attendance approved for Event ID $eventId.', 'approval')");
+        $stmt->execute([$tg['faculty_id'], $eventId]);
+    }
+} elseif ($newStatus === 'rejected') {
+    // Notify student and TG
+    $stmt = $eventDB->prepare("INSERT INTO notifications (student_id, event_id, title, message, type) VALUES (?, ?, 'Event Rejected', 'Event rejected by $currentRole. Details: $eventSummary.', 'rejection')");
+    $stmt->execute([$event['student_id'], $eventId]);
+    // Optional: Notify TG as well
+    if ($tg) {
+        $stmt = $eventDB->prepare("INSERT INTO notifications (faculty_id, event_id, title, message, type) VALUES (?, ?, 'Event Rejected', 'Student event rejected by $currentRole.', 'rejection')");
+        $stmt->execute([$tg['faculty_id'], $eventId]);
+    }
 }
 
 /* 4️⃣ Final response */
