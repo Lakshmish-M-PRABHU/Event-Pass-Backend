@@ -157,5 +157,18 @@ if ($currentIndex < count($flow) - 1) {
     ");
     $stmt->execute([$eventId]);
 
+    $stmt = $eventDB->prepare("SELECT student_id FROM events WHERE event_id = ?");
+    $stmt->execute([$eventId]);
+    $event = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($event) {
+        $stmt = $collegeDB->prepare("SELECT faculty_id FROM student_tg_mapping WHERE student_id = ?");
+        $stmt->execute([$event['student_id']]);
+        $tg = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($tg) {
+            $stmt = $eventDB->prepare("INSERT INTO notifications (faculty_id, event_id, title, message, type) VALUES (?, ?, 'Event Approved', 'Attendance approved for Event ID $eventId.', 'approval')");
+            $stmt->execute([$tg['faculty_id'], $eventId]);
+        }
+    }
+    
     echo json_encode(["message" => "Event fully approved"]);
 }

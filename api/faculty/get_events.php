@@ -40,8 +40,7 @@ try {
             e.activity_type,
             e.date_from,
             e.date_to,
-            e.uploaded_file,
-            e.images,  -- Added: JSON array of image paths
+            e.uploaded_file,  -- Use for single file/image; add 'images' column if needed for multiple
             e.status,
             e.approval_stage AS current_stage,
             s.name AS student_name,
@@ -54,11 +53,11 @@ try {
 
     if ($roleUpper === 'TG') {
         // TG sees events from their mapped students
-        $query .= " AND e.student_id IN (SELECT student_id FROM student_tg_mapping WHERE faculty_id = ?)";
+        $query .= " AND e.student_id IN (SELECT student_id FROM college_db.student_tg_mapping WHERE faculty_id = ?)";
         $params[] = $facultyId;
     } elseif ($roleUpper === 'COORDINATOR') {
         // Coordinators see events from their domain
-        $query .= " AND UPPER(e.activity_type) = (SELECT UPPER(activity_type) FROM faculty WHERE faculty_id = ?)";
+        $query .= " AND UPPER(e.activity_type) = (SELECT UPPER(activity_type) FROM college_db.faculty WHERE faculty_id = ?)";
         $params[] = $facultyId;
     } elseif (in_array($roleUpper, ['HOD', 'DEAN', 'PRINCIPAL'])) {
         // These see events at their approval stage
@@ -75,15 +74,17 @@ try {
 
     // Conditionally add financial details and images for response
     foreach ($events as &$event) {
-        $event['images'] = json_decode($event['images'] ?? '[]', true); // Decode images array
+        // Use uploaded_file as images array (adjust if you add a separate images column)
+        $event['images'] = [$event['uploaded_file']] ?? [];  // Single file as array; decode if JSON
         if (in_array($roleUpper, ['TG', 'DEAN'])) {
-            // Fetch and add financial details (assuming fields exist in events table)
+            // Use existing financial fields from table
             $event['financial_details'] = [
-                'budget' => $event['budget'] ?? null,
-                'expenses' => $event['expenses'] ?? null,
+                'financial_amount' => $event['financial_amount'] ?? null,
+                'financial_purpose' => $event['financial_purpose'] ?? null,
             ];
         }
-        // Remove sensitive fields for non-authorized roles if needed
+        // Remove uploaded_file from output if not needed
+        unset($event['uploaded_file']);
     }
 
     echo json_encode($events);
