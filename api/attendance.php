@@ -47,22 +47,14 @@ if (!$updated) {
     echo json_encode(["error" => "Failed to update attendance"]);
     exit;
 }
-if ($newStatus === 'approved' && $isFullyApproved) {
-    // Find TG for the student
+
+// Optional: Add notification to TG if attendance is marked (adjust as needed)
+if ($attended) {
     $stmt = $collegeDB->prepare("SELECT faculty_id FROM student_tg_mapping WHERE student_id = ?");
-    $stmt->execute([$event['student_id']]);
+    $stmt->execute([$studentId]);
     $tg = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($tg) {
-        $stmt = $eventDB->prepare("INSERT INTO notifications (faculty_id, event_id, title, message, type) VALUES (?, ?, 'Event Approved', 'Attendance approved for Event ID $eventId.', 'approval')");
-        $stmt->execute([$tg['faculty_id'], $eventId]);
-    }
-} elseif ($newStatus === 'rejected') {
-    // Notify student and TG
-    $stmt = $eventDB->prepare("INSERT INTO notifications (student_id, event_id, title, message, type) VALUES (?, ?, 'Event Rejected', 'Event rejected by $currentRole. Details: $eventSummary.', 'rejection')");
-    $stmt->execute([$event['student_id'], $eventId]);
-    // Optional: Notify TG as well
-    if ($tg) {
-        $stmt = $eventDB->prepare("INSERT INTO notifications (faculty_id, event_id, title, message, type) VALUES (?, ?, 'Event Rejected', 'Student event rejected by $currentRole.', 'rejection')");
+        $stmt = $eventDB->prepare("INSERT INTO notifications (faculty_id, event_id, title, message, type) VALUES (?, ?, 'Attendance Marked', 'Student has marked attendance for Event ID $eventId.', 'attendance')");
         $stmt->execute([$tg['faculty_id'], $eventId]);
     }
 }
