@@ -57,11 +57,17 @@ foreach ($flow as $role) {
     }
 }
 
-// 5️⃣ Check if attendance can be shown
-$allApproved = !empty($approvals) && count(array_filter($approvals, fn($a) => $a['status'] !== 'approved')) === 0;
+// 5️⃣ Check if attendance can be shown (fixed logic)
+$currentDate = date('Y-m-d');  // 2026-01-21
+$statusCheck = $event['status'] === 'approved';
+$dateCheck = $event['date_to'] <= $currentDate;
+$showAttendance = $statusCheck && $dateCheck ? true : false;
+
+// Debug logs
+error_log("Event ID: " . $event['event_id'] . ", Status: '" . $event['status'] . "', DateTo: '" . $event['date_to'] . "', CurrentDate: '" . $currentDate . "', StatusCheck: " . ($statusCheck ? 'true' : 'false') . ", DateCheck: " . ($dateCheck ? 'true' : 'false') . ", ShowAttendance: " . ($showAttendance ? 'true' : 'false'));
 
 echo json_encode([
     "event" => $event,
     "approvals" => $fullApprovals,
-    "showAttendance" => $allApproved && $event['status'] === 'completed'
+    "showAttendance" => $showAttendance
 ]);
