@@ -3,7 +3,7 @@ ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
 // ================= CORS =================
-$allowedOrigin = "http://localhost:5500";
+$allowedOrigin = "http://localhost:5501";
 header("Access-Control-Allow-Origin: $allowedOrigin");
 header("Access-Control-Allow-Credentials: true");
 header("Access-Control-Allow-Methods: GET, OPTIONS");
@@ -27,13 +27,14 @@ if (!$facultyId) {
 // ================= DATABASE =================
 require "../../config/events_db.php";   // $eventDB
 
-// ================= FETCH NOTIFICATIONS =================
+// ================= FETCH NOTIFICATIONS (ONLY FOR COMPLETED EVENTS) =================
 try {
     $stmt = $eventDB->prepare("
-        SELECT notification_id, event_id, title, message, type, created_at
-        FROM notifications
-        WHERE faculty_id = ?
-        ORDER BY created_at DESC
+        SELECT n.notification_id, n.event_id, n.title, n.message, n.type, n.created_at
+        FROM notifications n
+        INNER JOIN events e ON n.event_id = e.event_id
+        WHERE n.faculty_id = ? AND e.status = 'completed'
+        ORDER BY n.created_at DESC
     ");
     $stmt->execute([$facultyId]);
     $notifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -44,3 +45,4 @@ try {
     http_response_code(500);
     echo json_encode(["error" => "Database error: " . $e->getMessage()]);
 }
+?>

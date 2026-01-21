@@ -3,7 +3,7 @@ ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
 // ================= CORS =================
-$allowedOrigin = "http://localhost:5500";
+$allowedOrigin = "http://localhost:5501";
 header("Access-Control-Allow-Origin: $allowedOrigin");
 header("Access-Control-Allow-Credentials: true");
 header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
@@ -52,13 +52,15 @@ try {
     $params = [];
 
     if ($roleUpper === 'TG') {
-        // TG sees events from their mapped students
-        $query .= " AND e.student_id IN (SELECT student_id FROM college_db.student_tg_mapping WHERE faculty_id = ?)";
+        // TG sees events from their mapped students at their approval stage
+        $query .= " AND e.student_id IN (SELECT student_id FROM college_db.student_tg_mapping WHERE faculty_id = ?) AND e.approval_stage = ?";
         $params[] = $facultyId;
+        $params[] = $roleUpper;
     } elseif ($roleUpper === 'COORDINATOR') {
-        // Coordinators see events from their domain
-        $query .= " AND UPPER(e.activity_type) = (SELECT UPPER(activity_type) FROM college_db.faculty WHERE faculty_id = ?)";
+        // Coordinators see events from their domain at their approval stage
+        $query .= " AND UPPER(e.activity_type) = (SELECT UPPER(activity_type) FROM college_db.faculty WHERE faculty_id = ?) AND e.approval_stage = ?";
         $params[] = $facultyId;
+        $params[] = $roleUpper;
     } elseif (in_array($roleUpper, ['HOD', 'DEAN', 'PRINCIPAL'])) {
         // These see events at their approval stage
         $query .= " AND e.approval_stage = ?";
