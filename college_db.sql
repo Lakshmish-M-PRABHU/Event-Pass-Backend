@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Jan 20, 2026 at 10:47 AM
+-- Generation Time: Feb 04, 2026 at 06:47 AM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.2.12
 
@@ -28,7 +28,7 @@ SET time_zone = "+00:00";
 --
 
 CREATE TABLE `faculty` (
-  `faculty_id` int(11) NOT NULL,
+  `faculty_code` int(11) NOT NULL,
   `name` varchar(100) NOT NULL,
   `role` enum('TG','COORDINATOR','HOD','DEAN','PRINCIPAL') NOT NULL,
   `department` varchar(50) DEFAULT NULL,
@@ -40,7 +40,7 @@ CREATE TABLE `faculty` (
 -- Dumping data for table `faculty`
 --
 
-INSERT INTO `faculty` (`faculty_id`, `name`, `role`, `department`, `activity_type`, `created_at`) VALUES
+INSERT INTO `faculty` (`faculty_code`, `name`, `role`, `department`, `activity_type`, `created_at`) VALUES
 (1, 'Dr. Kumar', 'TG', 'CSE', NULL, '2026-01-14 09:00:21'),
 (2, 'Dr. Anitha', 'TG', 'ISE', NULL, '2026-01-14 09:00:21'),
 (3, 'Prof. Rajesh', 'COORDINATOR', 'CSE', 'Technical', '2026-01-14 09:00:21'),
@@ -58,7 +58,7 @@ INSERT INTO `faculty` (`faculty_id`, `name`, `role`, `department`, `activity_typ
 --
 
 CREATE TABLE `students` (
-  `student_id` int(11) NOT NULL,
+  `studid` int(11) NOT NULL,
   `usn` varchar(20) NOT NULL,
   `name` varchar(100) NOT NULL,
   `department` varchar(50) NOT NULL,
@@ -70,7 +70,7 @@ CREATE TABLE `students` (
 -- Dumping data for table `students`
 --
 
-INSERT INTO `students` (`student_id`, `usn`, `name`, `department`, `semester`, `created_at`) VALUES
+INSERT INTO `students` (`studid`, `usn`, `name`, `department`, `semester`, `created_at`) VALUES
 (7, '1CR21CS001', 'Aarav Kumar', 'CSE', 5, '2026-01-14 09:02:04'),
 (8, '1CR21CS002', 'Diya Patel', 'CSE', 5, '2026-01-14 09:02:04'),
 (9, '1CR21CS003', 'Rohan Singh', 'CSE', 5, '2026-01-14 09:02:04'),
@@ -85,8 +85,8 @@ INSERT INTO `students` (`student_id`, `usn`, `name`, `department`, `semester`, `
 
 CREATE TABLE `student_tg_mapping` (
   `id` int(11) NOT NULL,
-  `student_id` int(11) NOT NULL,
-  `faculty_id` int(11) NOT NULL,
+  `studid` int(11) NOT NULL,
+  `faculty_code` int(11) NOT NULL,
   `active` tinyint(1) DEFAULT 1,
   `from_date` date DEFAULT NULL,
   `to_date` date DEFAULT NULL
@@ -96,7 +96,7 @@ CREATE TABLE `student_tg_mapping` (
 -- Dumping data for table `student_tg_mapping`
 --
 
-INSERT INTO `student_tg_mapping` (`id`, `student_id`, `faculty_id`, `active`, `from_date`, `to_date`) VALUES
+INSERT INTO `student_tg_mapping` (`id`, `studid`, `faculty_code`, `active`, `from_date`, `to_date`) VALUES
 (6, 7, 1, 1, NULL, NULL),
 (7, 8, 1, 1, NULL, NULL),
 (8, 9, 2, 1, NULL, NULL),
@@ -111,13 +111,13 @@ INSERT INTO `student_tg_mapping` (`id`, `student_id`, `faculty_id`, `active`, `f
 -- Indexes for table `faculty`
 --
 ALTER TABLE `faculty`
-  ADD PRIMARY KEY (`faculty_id`);
+  ADD PRIMARY KEY (`faculty_code`);
 
 --
 -- Indexes for table `students`
 --
 ALTER TABLE `students`
-  ADD PRIMARY KEY (`student_id`),
+  ADD PRIMARY KEY (`studid`),
   ADD UNIQUE KEY `usn` (`usn`);
 
 --
@@ -125,8 +125,8 @@ ALTER TABLE `students`
 --
 ALTER TABLE `student_tg_mapping`
   ADD PRIMARY KEY (`id`),
-  ADD KEY `student_id` (`student_id`),
-  ADD KEY `faculty_id` (`faculty_id`);
+  ADD KEY `student_id` (`studid`),
+  ADD KEY `faculty_id` (`faculty_code`);
 
 --
 -- AUTO_INCREMENT for dumped tables
@@ -136,13 +136,13 @@ ALTER TABLE `student_tg_mapping`
 -- AUTO_INCREMENT for table `faculty`
 --
 ALTER TABLE `faculty`
-  MODIFY `faculty_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=10;
+  MODIFY `faculty_code` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=10;
 
 --
 -- AUTO_INCREMENT for table `students`
 --
 ALTER TABLE `students`
-  MODIFY `student_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=12;
+  MODIFY `studid` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=12;
 
 --
 -- AUTO_INCREMENT for table `student_tg_mapping`
@@ -158,8 +158,8 @@ ALTER TABLE `student_tg_mapping`
 -- Constraints for table `student_tg_mapping`
 --
 ALTER TABLE `student_tg_mapping`
-  ADD CONSTRAINT `student_tg_mapping_ibfk_1` FOREIGN KEY (`student_id`) REFERENCES `students` (`student_id`),
-  ADD CONSTRAINT `student_tg_mapping_ibfk_2` FOREIGN KEY (`faculty_id`) REFERENCES `faculty` (`faculty_id`);
+  ADD CONSTRAINT `student_tg_mapping_ibfk_1` FOREIGN KEY (`studid`) REFERENCES `students` (`studid`),
+  ADD CONSTRAINT `student_tg_mapping_ibfk_2` FOREIGN KEY (`faculty_code`) REFERENCES `faculty` (`faculty_code`);
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

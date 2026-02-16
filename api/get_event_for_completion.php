@@ -12,7 +12,7 @@ header("Content-Type: application/json");
 session_start();
 require "../config/events_db.php";
 
-$studentId = $_SESSION['student_id'] ?? null;
+$studentId = $_SESSION['studid'] ?? null;
 if (!$studentId) {
     http_response_code(401);
     echo json_encode(["error" => "Not logged in"]);
@@ -29,7 +29,7 @@ if (!$eventId) {
 $stmt = $eventDB->prepare("
     SELECT event_id, activity_name, activity_type, date_from, date_to, status, attendance
     FROM events
-    WHERE event_id = ? AND student_id = ?
+    WHERE event_id = ? AND studid = ?
 ");
 $stmt->execute([$eventId, $studentId]);
 $event = $stmt->fetch(PDO::FETCH_ASSOC);

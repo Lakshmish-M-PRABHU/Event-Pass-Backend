@@ -12,7 +12,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') exit;
 session_start();
 require "../config/events_db.php";
 
-$studentId = $_SESSION['student_id'] ?? null;
+$studentId = $_SESSION['stud_id'] ?? null;
 if (!$studentId) {
     http_response_code(401);
     echo json_encode(["error" => "Student not logged in"]);
@@ -33,7 +33,7 @@ if (!$eventId || !is_bool($attended)) {
 $stmt = $eventDB->prepare("
     SELECT status, date_to 
     FROM events 
-    WHERE event_id = ? AND student_id = ?
+    WHERE event_id = ? AND studid = ?
 ");
 $stmt->execute([$eventId, $studentId]);
 $event = $stmt->fetch(PDO::FETCH_ASSOC);

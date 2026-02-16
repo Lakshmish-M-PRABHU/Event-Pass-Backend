@@ -22,17 +22,17 @@ if (!$usn) {
     exit;
 }
 
-$stmt = $conn->prepare("SELECT student_id FROM students WHERE usn = ?");
+$stmt = $conn->prepare("SELECT studid FROM students WHERE usn = ?");
 $stmt->bind_param("s", $usn);
 $stmt->execute();
 $result = $stmt->get_result();
 
 if ($row = $result->fetch_assoc()) {
-    $_SESSION['student_id'] = $row['student_id'];
+    $_SESSION['studid'] = $row['studid'];
 
     echo json_encode([
         "success" => true,
-        "student_id" => $row['student_id']
+        "student_id" => $row['studid']
     ]);
 } else {
     echo json_encode(["error" => "Student not found"]);
