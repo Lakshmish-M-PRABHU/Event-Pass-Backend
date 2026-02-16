@@ -107,13 +107,13 @@ if (isset($_FILES['event_file']) && $_FILES['event_file']['error'] === 0) {
         mkdir($uploadsDir, 0777, true);
     }
 
-    $uploaded_file_name = time() . "_" . basename($_FILES['event_file']['name']);
-    $targetPath = $uploadsDir . $uploaded_file_name;
+$roles = ['TG','COORDINATOR','HOD','DEAN','PRINCIPAL'];
 
-    if (!move_uploaded_file($_FILES['event_file']['tmp_name'], $targetPath)) {
-        echo json_encode(["error"=>"Failed to upload file"]);
-        exit;
-    }
+foreach ($roles as $role) {
+  $eventDB->prepare(
+    "INSERT INTO attendance_approvals (attendance_id, approver_role)
+     VALUES (?, ?)"
+  )->execute([$attendanceId, $role]);
 }
 
 // ==============================

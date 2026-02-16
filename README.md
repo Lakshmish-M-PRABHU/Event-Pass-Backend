@@ -20,8 +20,12 @@ CREATE TABLE students (
 
 Student_id is the main key to get the student details from the college database
 
-	
-
+2. faculty
+CREATE TABLE faculty (
+  faculty_id INT PRIMARY KEY,
+  name VARCHAR(100),
+  designation ENUM('FACULTY','HOD','DEAN','PRINCIPAL')
+);
 
 3. Student_tg_mapping(TG mapping)
 CREATE TABLE faculty (
