@@ -33,7 +33,7 @@ if (!$name || !$role) {
 }
 
 $stmt = $collegeDB->prepare("
-    SELECT faculty_id, name, role 
+    SELECT faculty_code,name, role 
     FROM faculty 
     WHERE name = ? AND role = ?
 ");
@@ -46,7 +46,7 @@ if (!$faculty) {
     exit;
 }
 
-$_SESSION['faculty_id'] = $faculty['faculty_id'];
+$_SESSION['faculty_code'] = $faculty['faculty_code'];
 $_SESSION['role'] = $faculty['role'];
 
 echo json_encode([

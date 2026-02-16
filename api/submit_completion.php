@@ -14,7 +14,7 @@ require "../config/events_db.php";
 
 header("Content-Type: application/json");
 
-$studentId = $_SESSION['student_id'] ?? null;
+$studentId = $_SESSION['studid'] ?? null;
 if (!$studentId) {
     http_response_code(401);
     echo json_encode(["error" => "Not logged in"]);
@@ -37,7 +37,7 @@ if (!$eventId || !$experience || !$rating) {
 $stmt = $eventDB->prepare("
     SELECT attendance, status 
     FROM events 
-    WHERE event_id = ? AND student_id = ?
+    WHERE event_id = ? AND studid = ?
 ");
 $stmt->execute([$eventId, $studentId]);
 $event = $stmt->fetch(PDO::FETCH_ASSOC);

@@ -17,7 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 // ================= SESSION =================
 session_start();
 
-$facultyId = $_SESSION['faculty_id'] ?? null;
+$facultyId = $_SESSION['faculty_code'] ?? null;
 if (!$facultyId) {
     http_response_code(401);
     echo json_encode(["error" => "Faculty not logged in"]);
@@ -33,7 +33,7 @@ try {
         SELECT n.notification_id, n.event_id, n.title, n.message, n.type, n.created_at
         FROM notifications n
         INNER JOIN events e ON n.event_id = e.event_id
-        WHERE n.faculty_id = ? AND e.status = 'completed'
+        WHERE n.faculty_code = ? AND e.status = 'completed'
         ORDER BY n.created_at DESC
     ");
     $stmt->execute([$facultyId]);

@@ -12,7 +12,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') exit;
 session_start();
 require "../config/events_db.php";
 
-$studentId = $_SESSION['student_id'] ?? null;
+$studentId = $_SESSION['studid'] ?? null;
 if (!$studentId) {
     http_response_code(401);
     echo json_encode(["error" => "Student not logged in"]);
@@ -31,7 +31,7 @@ if (!$eventId || !$notes) {
 $stmt = $eventDB->prepare("
     SELECT attendance, status, date_to
     FROM events
-    WHERE event_id = ? AND student_id = ?
+    WHERE event_id = ? AND studid = ?
 ");
 $stmt->execute([$eventId, $studentId]);
 $event = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -60,13 +60,13 @@ $stmt = $eventDB->prepare("
 ");
 $stmt->execute([$notes, $eventId]);
 
-$stmt = $collegeDB->prepare("SELECT faculty_id FROM student_tg_mapping WHERE student_id = ?");
+$stmt = $collegeDB->prepare("SELECT faculty_code FROM student_tg_mapping WHERE studid = ?");
 $stmt->execute([$studentId]);
 $tg = $stmt->fetch(PDO::FETCH_ASSOC);
 if ($tg) {
     $completionSummary = "Event completed. Details: " . json_encode($data); // Summarize form data
-    $stmt = $eventDB->prepare("INSERT INTO notifications (faculty_id, event_id, title, message, type) VALUES (?, ?, 'Event Completed', ?, 'completion')");
-    $stmt->execute([$tg['faculty_id'], $eventId, $completionSummary]);
+    $stmt = $eventDB->prepare("INSERT INTO notifications (faculty_code, event_id, title, message, type) VALUES (?, ?, 'Event Completed', ?, 'completion')");
+    $stmt->execute([$tg['faculty_code'], $eventId, $completionSummary]);
 }
 
 // (Optional) notify TG + Coordinator here

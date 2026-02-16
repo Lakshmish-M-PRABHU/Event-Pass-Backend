@@ -11,17 +11,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 session_start();
 require "../config/college_db.php"; // make sure $collegeDB is correct
 
-if (!isset($_SESSION['student_id'])) {
+if (!isset($_SESSION['studid'])) {
     echo json_encode(["error" => "Student not logged in"]);
     exit;
 }
 
-$studentId = $_SESSION['student_id'];
+$studentId = $_SESSION['studid'];
 
 $stmt = $collegeDB->prepare(
   "SELECT usn, name, department, semester
    FROM students
-   WHERE student_id = ?"
+   WHERE studid = ?"
 );
 $stmt->execute([$studentId]);
 

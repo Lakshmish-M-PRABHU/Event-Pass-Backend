@@ -14,7 +14,7 @@ session_start();
 require "../config/events_db.php";
 require "../config/college_db.php";
 
-$studentId = $_SESSION['student_id'] ?? null;
+$studentId = $_SESSION['studid'] ?? null;
 if (!$studentId) {
     http_response_code(401);
     echo json_encode(["error" => "Not logged in"]);
@@ -38,7 +38,7 @@ $attendanceValue = $attended ? 1 : 0;
 $stmt = $eventDB->prepare("
     UPDATE events 
     SET attendance = ? 
-    WHERE event_id = ? AND student_id = ?
+    WHERE event_id = ? AND studid = ?
 ");
 $updated = $stmt->execute([$attendanceValue, $eventId, $studentId]);
 
@@ -50,12 +50,12 @@ if (!$updated) {
 
 // Optional: Add notification to TG if attendance is marked (adjust as needed)
 if ($attended) {
-    $stmt = $collegeDB->prepare("SELECT faculty_id FROM student_tg_mapping WHERE student_id = ?");
+    $stmt = $collegeDB->prepare("SELECT faculty_code FROM student_tg_mapping WHERE studid = ?");
     $stmt->execute([$studentId]);
     $tg = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($tg) {
-        $stmt = $eventDB->prepare("INSERT INTO notifications (faculty_id, event_id, title, message, type) VALUES (?, ?, 'Attendance Marked', 'Student has marked attendance for Event ID $eventId.', 'attendance')");
-        $stmt->execute([$tg['faculty_id'], $eventId]);
+        $stmt = $eventDB->prepare("INSERT INTO notifications (faculty_code, event_id, title, message, type) VALUES (?, ?, 'Attendance Marked', 'Student has marked attendance for Event ID $eventId.', 'attendance')");
+        $stmt->execute([$tg['faculty_code'], $eventId]);
     }
 }
 
