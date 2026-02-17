@@ -7,7 +7,7 @@ header("Access-Control-Allow-Headers: Content-Type");
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit(0);
 }
-// get_event_for_completion.php
+
 header("Content-Type: application/json");
 session_start();
 require "../config/events_db.php";
@@ -27,7 +27,7 @@ if (!$eventId) {
 }
 
 $stmt = $eventDB->prepare("
-    SELECT event_id, activity_name, activity_type, date_from, date_to, status, attendance
+    SELECT event_id, activity_name, activity_type, date_from, date_to, status, attendance, application_type
     FROM events
     WHERE event_id = ? AND studid = ?
 ");
@@ -40,12 +40,51 @@ if (!$event) {
     exit;
 }
 
-// IMPORTANT: only block access if attendance is explicitly 0
-if ($event['attendance'] === '0') {
+if (($event['application_type'] ?? '') === 'team') {
+    $leaderStmt = $eventDB->prepare("
+        SELECT 1
+        FROM team_members
+        WHERE event_id = ? AND studid = ? AND is_leader = 1
+        LIMIT 1
+    ");
+    $leaderStmt->execute([$eventId, $studentId]);
+    if (!$leaderStmt->fetchColumn()) {
+        http_response_code(403);
+        echo json_encode(["error" => "Only team leader can complete this event"]);
+        exit;
+    }
+}
+
+// Completion is allowed once event is approved and student has submitted "attended = yes".
+if ($event['status'] !== 'approved') {
     http_response_code(403);
-    echo json_encode(["error" => "Attendance rejected"]);
+    echo json_encode(["error" => "Completion not allowed yet"]);
     exit;
 }
 
-// attendance === NULL → buttons will show in frontend
+$attendanceStmt = $eventDB->prepare("
+    SELECT attended, final_status
+    FROM attendance
+    WHERE event_id = ? AND studid = ?
+    ORDER BY attendance_id DESC
+    LIMIT 1
+");
+$attendanceStmt->execute([$eventId, $studentId]);
+$attendance = $attendanceStmt->fetch(PDO::FETCH_ASSOC);
+
+$attendedValue = $attendance['attended'] ?? null;
+$attendedYes = (
+    $attendedValue === 1 ||
+    $attendedValue === '1' ||
+    $attendedValue === true ||
+    (is_string($attendedValue) && strtolower($attendedValue) === 'yes')
+);
+
+if (!$attendance || !$attendedYes || (($attendance['final_status'] ?? '') === 'rejected')) {
+    http_response_code(403);
+    echo json_encode(["error" => "Completion not allowed yet"]);
+    exit;
+}
+
 echo json_encode(["event" => $event]);
+?>

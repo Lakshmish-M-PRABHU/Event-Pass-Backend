@@ -108,17 +108,32 @@ try {
         if ($action === 'reject') {
             $stmt = $eventDB->prepare("UPDATE team_member_approvals SET status = 'rejected', action_date = NOW(), faculty_code = ? WHERE event_id = ? AND member_id = ? AND role = ?");
             $stmt->execute([$facultyId, $eventId, $memberId, $facultyRole]);
+
+            // Any rejection in team flow rejects the event at current role.
+            $stmt = $eventDB->prepare("UPDATE events SET status = 'rejected', approval_stage = ? WHERE event_id = ?");
+            $stmt->execute([$facultyRole, $eventId]);
         } else {
             $stmt = $eventDB->prepare("UPDATE team_member_approvals SET status = 'approved', action_date = NOW(), faculty_code = ? WHERE event_id = ? AND member_id = ? AND role = ?");
             $stmt->execute([$facultyId, $eventId, $memberId, $facultyRole]);
-            
-            $stmt = $eventDB->prepare("SELECT COUNT(*) as pending_count FROM team_member_approvals WHERE event_id = ? AND status = 'pending'");
-            $stmt->execute([$eventId]);
-            $pending = $stmt->fetch(PDO::FETCH_ASSOC);
-            
-            if ($pending['pending_count'] == 0) {
-                $stmt = $eventDB->prepare("UPDATE events SET status = 'approved' WHERE event_id = ?");
-                $stmt->execute([$eventId]);
+
+            // Move stage only when this role has finished all team members.
+            $stmt = $eventDB->prepare("
+                SELECT COUNT(*) as pending_count
+                FROM team_member_approvals
+                WHERE event_id = ? AND role = ? AND status = 'pending'
+            ");
+            $stmt->execute([$eventId, $facultyRole]);
+            $pendingForRole = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if ((int)$pendingForRole['pending_count'] === 0) {
+                if ($currentIndex < count($flow) - 1) {
+                    $nextStage = $flow[$currentIndex + 1];
+                    $stmt = $eventDB->prepare("UPDATE events SET approval_stage = ? WHERE event_id = ?");
+                    $stmt->execute([$nextStage, $eventId]);
+                } else {
+                    $stmt = $eventDB->prepare("UPDATE events SET status = 'approved' WHERE event_id = ?");
+                    $stmt->execute([$eventId]);
+                }
             }
         }
     } else {

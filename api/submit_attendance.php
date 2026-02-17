@@ -33,11 +33,17 @@ require "../config/events_db.php";
 // INPUT DATA
 // ==============================
 $event_id = $_POST['event_id'] ?? null;
-$attended = $_POST['attended'] ?? null;
+$attendedRaw = $_POST['attended'] ?? null;
 $remarks  = $_POST['remarks'] ?? null;
 
-if (!$event_id || !$attended) {
+if (!$event_id || $attendedRaw === null || $attendedRaw === '') {
     echo json_encode(["error" => "Event ID and attendance status required"]);
+    exit;
+}
+
+$attended = filter_var($attendedRaw, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+if ($attended === null) {
+    echo json_encode(["error" => "Invalid attendance status"]);
     exit;
 }
 

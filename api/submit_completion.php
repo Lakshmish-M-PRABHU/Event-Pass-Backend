@@ -35,23 +35,55 @@ if (!$eventId || !$experience || !$rating) {
 
 // Validate event
 $stmt = $eventDB->prepare("
-    SELECT attendance, status 
+    SELECT status, application_type
     FROM events 
     WHERE event_id = ? AND studid = ?
 ");
 $stmt->execute([$eventId, $studentId]);
 $event = $stmt->fetch(PDO::FETCH_ASSOC);
 
-if (
-    !$event ||
-    (int)$event['attendance'] !== 1 ||
-    $event['status'] !== 'approved'
-) {
+if (!$event || $event['status'] !== 'approved') {
     http_response_code(403);
-    echo json_encode([
-        "error" => "Invalid event state",
-        "debug" => $event
-    ]);
+    echo json_encode(["error" => "Invalid event state"]);
+    exit;
+}
+
+if (($event['application_type'] ?? '') === 'team') {
+    $leaderStmt = $eventDB->prepare("
+        SELECT 1
+        FROM team_members
+        WHERE event_id = ? AND studid = ? AND is_leader = 1
+        LIMIT 1
+    ");
+    $leaderStmt->execute([$eventId, $studentId]);
+    if (!$leaderStmt->fetchColumn()) {
+        http_response_code(403);
+        echo json_encode(["error" => "Only team leader can submit completion"]);
+        exit;
+    }
+}
+
+$attendanceStmt = $eventDB->prepare("
+    SELECT attended, final_status
+    FROM attendance
+    WHERE event_id = ? AND studid = ?
+    ORDER BY attendance_id DESC
+    LIMIT 1
+");
+$attendanceStmt->execute([$eventId, $studentId]);
+$attendance = $attendanceStmt->fetch(PDO::FETCH_ASSOC);
+
+$attendedValue = $attendance['attended'] ?? null;
+$attendedYes = (
+    $attendedValue === 1 ||
+    $attendedValue === '1' ||
+    $attendedValue === true ||
+    (is_string($attendedValue) && strtolower($attendedValue) === 'yes')
+);
+
+if (!$attendance || !$attendedYes || (($attendance['final_status'] ?? '') === 'rejected')) {
+    http_response_code(403);
+    echo json_encode(["error" => "Invalid event state"]);
     exit;
 }
 

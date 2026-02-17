@@ -29,7 +29,6 @@ require "../../config/college_db.php";
 
 try {
     $roleUpper = strtoupper($role);
-    $roleLower = strtolower($role);
     
     $query = "
     SELECT DISTINCT
@@ -61,18 +60,18 @@ try {
     $params = [];
 
     if ($roleUpper === 'TG') {
-        $query .= " AND (e.studid IN (SELECT studid FROM college_db.student_tg_mapping WHERE faculty_code = ?) OR tm.studid IN (SELECT studid FROM college_db.student_tg_mapping WHERE faculty_code = ?)) AND e.approval_stage = ?";
+        $query .= " AND (e.studid IN (SELECT studid FROM college_db.student_tg_mapping WHERE faculty_code = ?) OR tm.studid IN (SELECT studid FROM college_db.student_tg_mapping WHERE faculty_code = ?)) AND UPPER(e.approval_stage) = ?";
         $params[] = $facultyId;
         $params[] = $facultyId;
-        $params[] = $roleLower;
+        $params[] = $roleUpper;
     }
     elseif ($roleUpper === 'COORDINATOR') {
-        $query .= " AND UPPER(e.activity_type) = (SELECT UPPER(activity_type) FROM college_db.faculty WHERE faculty_code = ?) AND e.approval_stage = ?";
+        $query .= " AND UPPER(e.activity_type) = (SELECT UPPER(activity_type) FROM college_db.faculty WHERE faculty_code = ?) AND UPPER(e.approval_stage) = ?";
         $params[] = $facultyId;
-        $params[] = $roleLower;
+        $params[] = $roleUpper;
     } elseif (in_array($roleUpper, ['HOD', 'DEAN', 'PRINCIPAL'])) {
-        $query .= " AND e.approval_stage = ?";
-        $params[] = $roleLower;
+        $query .= " AND UPPER(e.approval_stage) = ?";
+        $params[] = $roleUpper;
     }
 
     $query .= " ORDER BY e.submission_date DESC";
