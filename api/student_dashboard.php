@@ -30,12 +30,12 @@ $statsQ = $eventDB->prepare("
     COUNT(DISTINCT e.event_id) total,
     SUM(e.status='approved') approved,
     SUM(e.status='pending') pending,
-    SUM(e.status='completed') completed
+    SUM(CASE WHEN e.studid = ? AND e.status='completed' THEN 1 ELSE 0 END) completed
   FROM events e
   LEFT JOIN team_members tm ON e.event_id = tm.event_id
   WHERE e.studid=? OR tm.studid=?
 ");
-$statsQ->execute([$studentId, $studentId]);
+$statsQ->execute([$studentId, $studentId, $studentId]);
 $stats = $statsQ->fetch(PDO::FETCH_ASSOC);
 
 // Applications - events where student is leader OR team member
