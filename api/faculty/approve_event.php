@@ -3,7 +3,7 @@ ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
 header("Content-Type: application/json");
-header("Access-Control-Allow-Origin: http://localhost:5501");
+header("Access-Control-Allow-Origin: http://127.0.0.1:5501");
 header("Access-Control-Allow-Credentials: true");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type");
@@ -20,6 +20,22 @@ if (!isset($_SESSION['faculty_code'], $_SESSION['role'])) {
 
 require "../../config/events_db.php";
 require "../../config/college_db.php";
+
+function ensureTeamConsentTable(PDO $eventDB) {
+    $eventDB->exec("
+        CREATE TABLE IF NOT EXISTS team_member_consents (
+            consent_id INT AUTO_INCREMENT PRIMARY KEY,
+            event_id INT NOT NULL,
+            member_id INT NOT NULL,
+            studid INT NOT NULL,
+            consent_status ENUM('pending', 'accepted', 'rejected') DEFAULT 'pending',
+            responded_at TIMESTAMP NULL DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_event_member (event_id, member_id),
+            INDEX idx_event_studid (event_id, studid)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+    ");
+}
 
 $facultyId = $_SESSION['faculty_code'];
 $facultyRole = $_SESSION['role'];
@@ -102,7 +118,43 @@ if ($currentIndex === false) {
 }
 
 try {
+    if ($event['application_type'] === 'team') {
+        ensureTeamConsentTable($eventDB);
+    }
     $eventDB->beginTransaction();
+
+    if ($event['application_type'] === 'team') {
+
+        $consentCheckStmt = $eventDB->prepare("
+            SELECT
+                SUM(CASE WHEN COALESCE(tc.consent_status, CASE WHEN tm.is_leader = 1 THEN 'accepted' ELSE 'pending' END) = 'pending' THEN 1 ELSE 0 END) AS pending_count,
+                SUM(CASE WHEN COALESCE(tc.consent_status, CASE WHEN tm.is_leader = 1 THEN 'accepted' ELSE 'pending' END) = 'rejected' THEN 1 ELSE 0 END) AS rejected_count
+            FROM team_members tm
+            LEFT JOIN team_member_consents tc
+                ON tc.event_id = tm.event_id AND tc.member_id = tm.member_id
+            WHERE tm.event_id = ?
+        ");
+        $consentCheckStmt->execute([$eventId]);
+        $consentState = $consentCheckStmt->fetch(PDO::FETCH_ASSOC);
+
+        if ((int)($consentState['rejected_count'] ?? 0) > 0) {
+            $stmt = $eventDB->prepare("UPDATE events SET status = 'rejected' WHERE event_id = ?");
+            $stmt->execute([$eventId]);
+            $eventDB->commit();
+            http_response_code(409);
+            echo json_encode(["error" => "A team member declined this event invitation."]);
+            exit;
+        }
+
+        if ((int)($consentState['pending_count'] ?? 0) > 0) {
+            if ($eventDB->inTransaction()) {
+                $eventDB->rollBack();
+            }
+            http_response_code(409);
+            echo json_encode(["error" => "Waiting for all team members to confirm participation."]);
+            exit;
+        }
+    }
 
     if ($event['application_type'] === 'team') {
         if ($action === 'reject') {
@@ -158,11 +210,15 @@ try {
         }
     }
 
-    $eventDB->commit();
+    if ($eventDB->inTransaction()) {
+        $eventDB->commit();
+    }
     echo json_encode(["message" => "Action completed successfully"]);
 
 } catch (Exception $e) {
-    $eventDB->rollBack();
+    if ($eventDB->inTransaction()) {
+        $eventDB->rollBack();
+    }
     echo json_encode(["error" => $e->getMessage()]);
 }
 ?>

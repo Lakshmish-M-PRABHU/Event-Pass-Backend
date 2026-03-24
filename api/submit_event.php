@@ -6,7 +6,7 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-header("Access-Control-Allow-Origin: http://localhost:5501");
+header("Access-Control-Allow-Origin: http://127.0.0.1:5501");
 header("Access-Control-Allow-Credentials: true");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type");
@@ -28,6 +28,22 @@ if (!$studentId) {
 // ==============================
 require "../config/college_db.php";
 require "../config/events_db.php";
+
+function ensureTeamConsentTable(PDO $eventDB) {
+    $eventDB->exec("
+        CREATE TABLE IF NOT EXISTS team_member_consents (
+            consent_id INT AUTO_INCREMENT PRIMARY KEY,
+            event_id INT NOT NULL,
+            member_id INT NOT NULL,
+            studid INT NOT NULL,
+            consent_status ENUM('pending', 'accepted', 'rejected') DEFAULT 'pending',
+            responded_at TIMESTAMP NULL DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_event_member (event_id, member_id),
+            INDEX idx_event_studid (event_id, studid)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+    ");
+}
 
 // ==============================
 // VALIDATE STUDENT
@@ -106,14 +122,6 @@ if (isset($_FILES['event_file']) && $_FILES['event_file']['error'] === 0) {
     if (!is_dir($uploadsDir)) {
         mkdir($uploadsDir, 0777, true);
     }
-
-$roles = ['TG','COORDINATOR','HOD','DEAN','PRINCIPAL'];
-
-foreach ($roles as $role) {
-  $eventDB->prepare(
-    "INSERT INTO attendance_approvals (attendance_id, approver_role)
-     VALUES (?, ?)"
-  )->execute([$attendanceId, $role]);
 }
 
 // ==============================
@@ -122,6 +130,7 @@ foreach ($roles as $role) {
 $trackingId = "EV-" . rand(100,999);
 
 try {
+    ensureTeamConsentTable($eventDB);
     $eventDB->beginTransaction();
     
     $stmt = $eventDB->prepare("
@@ -146,6 +155,12 @@ try {
         $stmt = $eventDB->prepare("INSERT INTO team_members (event_id, studid, usn, name, department, is_leader) VALUES (?, ?, ?, ?, ?, 1)");
         $stmt->execute([$eventId, $studentId, $student['usn'], $student['name'], $student['department']]);
         $leaderMemberId = $eventDB->lastInsertId();
+
+        $consentStmt = $eventDB->prepare("
+            INSERT INTO team_member_consents (event_id, member_id, studid, consent_status, responded_at)
+            VALUES (?, ?, ?, 'accepted', NOW())
+        ");
+        $consentStmt->execute([$eventId, $leaderMemberId, $studentId]);
         
         // Create approval flow for leader
         $roles = ['TG', 'COORDINATOR', 'HOD', 'DEAN', 'PRINCIPAL'];
@@ -164,6 +179,12 @@ try {
                 $stmt = $eventDB->prepare("INSERT INTO team_members (event_id, studid, usn, name, department, is_leader) VALUES (?, ?, ?, ?, ?, 0)");
                 $stmt->execute([$eventId, $memberData['studid'], $usn, $memberData['name'], $memberData['department']]);
                 $memberId = $eventDB->lastInsertId();
+
+                $consentStmt = $eventDB->prepare("
+                    INSERT INTO team_member_consents (event_id, member_id, studid, consent_status)
+                    VALUES (?, ?, ?, 'pending')
+                ");
+                $consentStmt->execute([$eventId, $memberId, $memberData['studid']]);
                 
                 // Create approval flow for member
                 foreach ($roles as $role) {
@@ -172,7 +193,8 @@ try {
                 }
             }
         }
-    } else {
+    } 
+    else {
         // ==============================
         // INDIVIDUAL EVENT PROCESSING
         // ==============================
@@ -195,7 +217,9 @@ try {
 
 
 } catch (PDOException $e) {
-    $eventDB->rollBack();
+    if ($eventDB->inTransaction()) {
+        $eventDB->rollBack();
+    }
     echo json_encode(["error" => "Database error: " . $e->getMessage()]);
 }
 ?>

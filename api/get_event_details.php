@@ -1,5 +1,5 @@
 <?php
-header("Access-Control-Allow-Origin: http://localhost:5501");
+header("Access-Control-Allow-Origin: http://127.0.0.1:5501");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type");
 header("Access-Control-Allow-Credentials: true");
@@ -9,6 +9,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') exit(0);
 session_start();
 require "../config/events_db.php";
 require "../config/college_db.php";
+
+function ensureTeamConsentTable(PDO $eventDB) {
+    $eventDB->exec("
+        CREATE TABLE IF NOT EXISTS team_member_consents (
+            consent_id INT AUTO_INCREMENT PRIMARY KEY,
+            event_id INT NOT NULL,
+            member_id INT NOT NULL,
+            studid INT NOT NULL,
+            consent_status ENUM('pending', 'accepted', 'rejected') DEFAULT 'pending',
+            responded_at TIMESTAMP NULL DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_event_member (event_id, member_id),
+            INDEX idx_event_studid (event_id, studid)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+    ");
+}
 
 $input = json_decode(file_get_contents('php://input'), true);
 $eventId = $input['event_id'] ?? null;
@@ -47,7 +63,12 @@ if (!$event) {
 // For team events, get the logged-in student's team member info
 $currentStudentMemberInfo = null;
 $currentStudentApprovals = [];
+$currentStudentConsent = null;
+$teamMemberConsents = [];
+$allMembersConsented = false;
 if ($event['application_type'] === 'team') {
+    ensureTeamConsentTable($eventDB);
+
     $memberStmt = $eventDB->prepare("
         SELECT member_id, studid, usn, name, department, is_leader
         FROM team_members
@@ -89,6 +110,47 @@ if ($event['application_type'] === 'team') {
                 "status" => $memberApproval ? strtolower($memberApproval['status']) : 'pending',
                 "date" => $memberApproval['action_date'] ?? null
             ];
+        }
+
+        $consentStmt = $eventDB->prepare("
+            SELECT consent_status, responded_at
+            FROM team_member_consents
+            WHERE event_id = ? AND member_id = ?
+            LIMIT 1
+        ");
+        $consentStmt->execute([$event['event_id'], $currentStudentMemberInfo['member_id']]);
+        $consentRow = $consentStmt->fetch(PDO::FETCH_ASSOC);
+        $currentStudentConsent = [
+            "status" => $consentRow['consent_status'] ?? (($currentStudentMemberInfo['is_leader'] == 1) ? 'accepted' : 'pending'),
+            "responded_at" => $consentRow['responded_at'] ?? null
+        ];
+    }
+
+    $teamConsentStmt = $eventDB->prepare("
+        SELECT
+            tm.member_id,
+            tm.studid,
+            tm.usn,
+            tm.name,
+            tm.is_leader,
+            COALESCE(tc.consent_status, CASE WHEN tm.is_leader = 1 THEN 'accepted' ELSE 'pending' END) AS consent_status,
+            tc.responded_at
+        FROM team_members tm
+        LEFT JOIN team_member_consents tc
+            ON tc.event_id = tm.event_id AND tc.member_id = tm.member_id
+        WHERE tm.event_id = ?
+        ORDER BY tm.is_leader DESC, tm.member_id ASC
+    ");
+    $teamConsentStmt->execute([$event['event_id']]);
+    $teamMemberConsents = $teamConsentStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    if (!empty($teamMemberConsents)) {
+        $allMembersConsented = true;
+        foreach ($teamMemberConsents as $consentInfo) {
+            if (($consentInfo['consent_status'] ?? 'pending') !== 'accepted') {
+                $allMembersConsented = false;
+                break;
+            }
         }
     }
 }
@@ -313,13 +375,18 @@ if ($event['application_type'] === 'team') {
             'is_leader' => $currentStudentMemberInfo['is_leader']
         ];
         $response['current_student_approvals'] = $currentStudentApprovals;
+        $response['current_student_consent'] = $currentStudentConsent;
         $response['is_team_leader'] = ($currentStudentMemberInfo['is_leader'] == 1);
     } else {
         // Member info not found - this shouldn't happen, but include what we can
         $response['current_student_member'] = null;
         $response['current_student_approvals'] = [];
+        $response['current_student_consent'] = null;
         $response['is_team_leader'] = ($event['studid'] == $studentId);
     }
+
+    $response['team_member_consents'] = $teamMemberConsents;
+    $response['all_members_consented'] = $allMembersConsented;
 }
 
 echo json_encode($response);

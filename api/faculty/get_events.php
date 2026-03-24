@@ -3,7 +3,7 @@ ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
 header("Content-Type: application/json");
-header("Access-Control-Allow-Origin: http://localhost:5501");
+header("Access-Control-Allow-Origin: http://127.0.0.1:5501");
 header("Access-Control-Allow-Credentials: true");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type");
@@ -27,7 +27,24 @@ if (!$facultyId || !$role) {
 require "../../config/events_db.php";
 require "../../config/college_db.php";
 
+function ensureTeamConsentTable(PDO $eventDB) {
+    $eventDB->exec("
+        CREATE TABLE IF NOT EXISTS team_member_consents (
+            consent_id INT AUTO_INCREMENT PRIMARY KEY,
+            event_id INT NOT NULL,
+            member_id INT NOT NULL,
+            studid INT NOT NULL,
+            consent_status ENUM('pending', 'accepted', 'rejected') DEFAULT 'pending',
+            responded_at TIMESTAMP NULL DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_event_member (event_id, member_id),
+            INDEX idx_event_studid (event_id, studid)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+    ");
+}
+
 try {
+    ensureTeamConsentTable($eventDB);
     $roleUpper = strtoupper($role);
     
     $query = "
@@ -54,6 +71,17 @@ try {
         SELECT 1 FROM attendance a
         WHERE a.event_id = e.event_id
         AND a.final_status = 'verified'
+    )
+    AND (
+        e.application_type <> 'team'
+        OR NOT EXISTS (
+            SELECT 1
+            FROM team_members tmc
+            LEFT JOIN team_member_consents tcc
+                ON tcc.event_id = tmc.event_id AND tcc.member_id = tmc.member_id
+            WHERE tmc.event_id = e.event_id
+            AND COALESCE(tcc.consent_status, CASE WHEN tmc.is_leader = 1 THEN 'accepted' ELSE 'pending' END) <> 'accepted'
+        )
     )
     ";
 

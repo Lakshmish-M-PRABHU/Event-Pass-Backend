@@ -1,6 +1,6 @@
 <?php
 $collegeDB = new PDO(
-  "mysql:host=localhost;dbname=college_db",
+  "mysql:host=127.0.0.1;dbname=college_db",
   "root",
   ""
 );
