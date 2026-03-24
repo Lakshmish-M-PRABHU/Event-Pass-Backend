@@ -1,6 +1,6 @@
 <?php
 $eventDB = new PDO(
-  "mysql:host=localhost;dbname=event_db",
+  "mysql:host=127.0.0.1;dbname=event_db",
   "root",
   ""
 );
