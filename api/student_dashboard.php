@@ -40,7 +40,7 @@ $stats = $statsQ->fetch(PDO::FETCH_ASSOC);
 
 // Applications - events where student is leader OR team member
 $appQ = $eventDB->prepare("
-  SELECT DISTINCT e.event_id, e.tracking_id, e.activity_name, e.status, e.studid
+  SELECT DISTINCT e.event_id, e.tracking_id, e.activity_name, e.status, e.studid, e.submission_date
   FROM events e
   LEFT JOIN team_members tm ON e.event_id = tm.event_id
   WHERE e.studid=? OR tm.studid=?

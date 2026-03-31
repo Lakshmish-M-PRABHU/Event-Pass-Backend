@@ -56,7 +56,7 @@ try {
         e.date_to,
         e.uploaded_file,
         e.status,
-        e.approval_stage AS current_stage,
+        COALESCE(e.approval_stage, 'TG') AS current_stage,
         e.application_type,
         e.financial_amount,
         e.financial_purpose,
@@ -88,18 +88,18 @@ try {
     $params = [];
 
     if ($roleUpper === 'TG') {
-        $query .= " AND (e.studid IN (SELECT studid FROM college_db.student_tg_mapping WHERE faculty_code = ?) OR tm.studid IN (SELECT studid FROM college_db.student_tg_mapping WHERE faculty_code = ?)) AND UPPER(e.approval_stage) = ?";
+        $query .= " AND (e.studid IN (SELECT studid FROM college_db.student_tg_mapping WHERE faculty_code = ?) OR tm.studid IN (SELECT studid FROM college_db.student_tg_mapping WHERE faculty_code = ?)) AND UPPER(COALESCE(e.approval_stage, 'TG')) = ?";
         $params[] = $facultyId;
         $params[] = $facultyId;
         $params[] = $roleUpper;
     }
     elseif ($roleUpper === 'COORDINATOR') {
-        $query .= " AND UPPER(e.activity_type) = (SELECT UPPER(activity_type) FROM college_db.faculty WHERE faculty_code = ?) AND UPPER(e.approval_stage) = ?";
+        $query .= " AND UPPER(e.activity_type) = (SELECT UPPER(activity_type) FROM college_db.faculty WHERE faculty_code = ?) AND UPPER(COALESCE(e.approval_stage, 'TG')) = ?";
         $params[] = $facultyId;
         $params[] = $roleUpper;
     } elseif (in_array($roleUpper, ['HOD', 'DEAN', 'PRINCIPAL'])) {
-        $query .= " AND UPPER(e.approval_stage) = ?";
-        $params[] = $roleUpper;
+        $query .= " AND UPPER(COALESCE(e.approval_stage, 'TG')) = ?";
+    $params[] = $roleUpper;
     }
 
     $query .= " ORDER BY e.submission_date DESC";

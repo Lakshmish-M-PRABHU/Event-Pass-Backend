@@ -14,6 +14,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 session_start();
 require "../config/events_db.php";
+require "../config/college_db.php";
 
 function ensureTeamConsentTable(PDO $eventDB) {
     $eventDB->exec("
@@ -29,6 +30,36 @@ function ensureTeamConsentTable(PDO $eventDB) {
             INDEX idx_event_studid (event_id, studid)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
     ");
+}
+
+function getTGFacultyCodes(PDO $collegeDB, array $studentIds) {
+    if (empty($studentIds)) return [];
+    $placeholders = implode(',', array_fill(0, count($studentIds), '?'));
+    $stmt = $collegeDB->prepare("
+        SELECT DISTINCT faculty_code
+        FROM student_tg_mapping
+        WHERE studid IN ($placeholders)
+        AND (active = 1 OR active IS NULL)
+    ");
+    $stmt->execute($studentIds);
+    return $stmt->fetchAll(PDO::FETCH_COLUMN);
+}
+
+function insertNotification(PDO $eventDB, $facultyCode, $eventId, $title, $message, $type) {
+    if (!$facultyCode) return;
+    $check = $eventDB->prepare("
+        SELECT 1 FROM notifications
+        WHERE faculty_code = ? AND event_id = ? AND type = ? AND title = ?
+        LIMIT 1
+    ");
+    $check->execute([$facultyCode, $eventId, $type, $title]);
+    if ($check->fetchColumn()) return;
+
+    $stmt = $eventDB->prepare("
+        INSERT INTO notifications (faculty_code, event_id, title, message, type)
+        VALUES (?, ?, ?, ?, ?)
+    ");
+    $stmt->execute([$facultyCode, $eventId, $title, $message, $type]);
 }
 
 $studentId = $_SESSION['studid'] ?? null;
@@ -53,7 +84,7 @@ try {
     $eventDB->beginTransaction();
 
     $eventStmt = $eventDB->prepare("
-        SELECT event_id, application_type, status
+        SELECT event_id, application_type, status, activity_name, tracking_id
         FROM events
         WHERE event_id = ?
         LIMIT 1
@@ -135,6 +166,28 @@ try {
     $summaryStmt->execute([$eventId]);
     $summary = $summaryStmt->fetch(PDO::FETCH_ASSOC);
 
+    $allMembersConsented = ((int)($summary['pending_count'] ?? 0) === 0 && (int)($summary['rejected_count'] ?? 0) === 0);
+
+    if ($allMembersConsented) {
+        $teamStmt = $eventDB->prepare("
+            SELECT studid
+            FROM team_members
+            WHERE event_id = ?
+        ");
+        $teamStmt->execute([$eventId]);
+        $studentIds = $teamStmt->fetchAll(PDO::FETCH_COLUMN);
+        $tgCodes = getTGFacultyCodes($collegeDB, $studentIds);
+
+        $title = "Team Consent Completed";
+        $message = "All team members confirmed participation for " .
+            ($event['activity_name'] ?? 'the event') .
+            ($event['tracking_id'] ? " (Event " . $event['tracking_id'] . ")" : "") .
+            ". Approval can proceed.";
+        foreach ($tgCodes as $tgCode) {
+            insertNotification($eventDB, $tgCode, $eventId, $title, $message, "approval");
+        }
+    }
+
     if ($eventDB->inTransaction()) {
         $eventDB->commit();
     }
@@ -142,7 +195,7 @@ try {
     echo json_encode([
         "success" => true,
         "consent_status" => $status,
-        "all_members_consented" => ((int)($summary['pending_count'] ?? 0) === 0 && (int)($summary['rejected_count'] ?? 0) === 0),
+        "all_members_consented" => $allMembersConsented,
         "summary" => [
             "accepted" => (int)($summary['accepted_count'] ?? 0),
             "pending" => (int)($summary['pending_count'] ?? 0),

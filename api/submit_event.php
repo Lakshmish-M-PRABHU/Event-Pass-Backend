@@ -122,6 +122,23 @@ if (isset($_FILES['event_file']) && $_FILES['event_file']['error'] === 0) {
     if (!is_dir($uploadsDir)) {
         mkdir($uploadsDir, 0777, true);
     }
+
+    $originalName = $_FILES['event_file']['name'] ?? 'upload';
+    $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+    $allowed = ['pdf', 'jpg', 'jpeg', 'png'];
+    if (!in_array($ext, $allowed, true)) {
+        echo json_encode(["error" => "Invalid file type"]);
+        exit;
+    }
+
+    $baseName = preg_replace('/[^a-zA-Z0-9_-]/', '_', pathinfo($originalName, PATHINFO_FILENAME));
+    $uploaded_file_name = time() . "_" . $baseName . "." . $ext;
+    $targetPath = $uploadsDir . $uploaded_file_name;
+
+    if (!move_uploaded_file($_FILES['event_file']['tmp_name'], $targetPath)) {
+        echo json_encode(["error" => "Failed to save uploaded file"]);
+        exit;
+    }
 }
 
 // ==============================
@@ -137,8 +154,8 @@ try {
     INSERT INTO events 
     (studid, tracking_id, activity_type, activity_name, date_from, date_to,
      activity_level, residency, event_url, uploaded_file,
-     financial_assistance, financial_purpose, financial_amount, status, application_type)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+     financial_assistance, financial_purpose, financial_amount, status, application_type, approval_stage)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, 'TG')
     ");
 
 

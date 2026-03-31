@@ -11,6 +11,7 @@ header("Access-Control-Allow-Headers: Content-Type");
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') exit(0);
 session_start();
 require "../config/events_db.php";
+require "../config/college_db.php";
 
 header("Content-Type: application/json");
 
@@ -35,7 +36,7 @@ if (!$eventId || !$experience || !$rating) {
 
 // Validate event
 $stmt = $eventDB->prepare("
-    SELECT status, application_type
+    SELECT status, application_type, activity_name, tracking_id
     FROM events 
     WHERE event_id = ? AND studid = ?
 ");
@@ -113,5 +114,61 @@ $stmt = $eventDB->prepare("
     WHERE event_id = ?
 ");
 $stmt->execute([$eventId]);
+function getTGFacultyCodes(PDO $collegeDB, array $studentIds) {
+    if (empty($studentIds)) return [];
+    $placeholders = implode(',', array_fill(0, count($studentIds), '?'));
+    $stmt = $collegeDB->prepare("
+        SELECT DISTINCT faculty_code
+        FROM student_tg_mapping
+        WHERE studid IN ($placeholders)
+        AND (active = 1 OR active IS NULL)
+    ");
+    $stmt->execute($studentIds);
+    return $stmt->fetchAll(PDO::FETCH_COLUMN);
+}
+
+function insertNotification(PDO $eventDB, $facultyCode, $eventId, $title, $message, $type) {
+    if (!$facultyCode) return;
+    $check = $eventDB->prepare("
+        SELECT 1 FROM notifications
+        WHERE faculty_code = ? AND event_id = ? AND type = ? AND title = ?
+        LIMIT 1
+    ");
+    $check->execute([$facultyCode, $eventId, $type, $title]);
+    if ($check->fetchColumn()) return;
+
+    $stmt = $eventDB->prepare("
+        INSERT INTO notifications (faculty_code, event_id, title, message, type)
+        VALUES (?, ?, ?, ?, ?)
+    ");
+    $stmt->execute([$facultyCode, $eventId, $title, $message, $type]);
+}
+
+try {
+    $studentIds = [$studentId];
+
+    if (($event['application_type'] ?? '') === 'team') {
+        $teamStmt = $eventDB->prepare("
+            SELECT studid
+            FROM team_members
+            WHERE event_id = ?
+        ");
+        $teamStmt->execute([$eventId]);
+        $studentIds = $teamStmt->fetchAll(PDO::FETCH_COLUMN);
+    }
+
+    $tgCodes = getTGFacultyCodes($collegeDB, $studentIds);
+    $title = "Completion Submitted";
+    $message = "Completion submitted for " .
+        ($event['activity_name'] ?? 'the event') .
+        ($event['tracking_id'] ? " (Event " . $event['tracking_id'] . ")" : "") .
+        ". Please review the completion details.";
+
+    foreach ($tgCodes as $tgCode) {
+        insertNotification($eventDB, $tgCode, $eventId, $title, $message, "completion");
+    }
+} catch (Exception $e) {
+    // Notifications are best-effort; do not block completion success.
+}
 
 echo json_encode(["success" => true]);
