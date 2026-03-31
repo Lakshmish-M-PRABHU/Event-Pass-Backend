@@ -6,7 +6,7 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-header("Access-Control-Allow-Origin: http://localhost:5501");
+header("Access-Control-Allow-Origin: http://127.0.0.1:5501");
 header("Access-Control-Allow-Credentials: true");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type");
@@ -28,6 +28,34 @@ if (!$studentId) {
 // ==============================
 require "../config/college_db.php";
 require "../config/events_db.php";
+
+function getTGFacultyCodes(PDO $collegeDB, $studentId) {
+    $stmt = $collegeDB->prepare("
+        SELECT DISTINCT faculty_code
+        FROM student_tg_mapping
+        WHERE studid = ?
+        AND (active = 1 OR active IS NULL)
+    ");
+    $stmt->execute([$studentId]);
+    return $stmt->fetchAll(PDO::FETCH_COLUMN);
+}
+
+function insertNotification(PDO $eventDB, $facultyCode, $eventId, $title, $message, $type) {
+    if (!$facultyCode) return;
+    $check = $eventDB->prepare("
+        SELECT 1 FROM notifications
+        WHERE faculty_code = ? AND event_id = ? AND type = ? AND title = ?
+        LIMIT 1
+    ");
+    $check->execute([$facultyCode, $eventId, $type, $title]);
+    if ($check->fetchColumn()) return;
+
+    $stmt = $eventDB->prepare("
+        INSERT INTO notifications (faculty_code, event_id, title, message, type)
+        VALUES (?, ?, ?, ?, ?)
+    ");
+    $stmt->execute([$facultyCode, $eventId, $title, $message, $type]);
+}
 
 // ==============================
 // INPUT DATA
@@ -51,7 +79,7 @@ if ($attended === null) {
 // VALIDATE EVENT & GET EVENT DETAILS
 // ==============================
 $stmt = $eventDB->prepare("
-    SELECT event_id, status, application_type, activity_type, studid
+    SELECT event_id, status, application_type, activity_type, studid, activity_name, tracking_id
     FROM events 
     WHERE event_id = ?
 ");
@@ -174,6 +202,17 @@ try {
                     $role
                 ]);
             }
+
+            $tgCodes = getTGFacultyCodes($collegeDB, $member['studid']);
+            $title = "Attendance Submitted - " . ($member['usn'] ?? $member['studid']);
+            $message = "Student " . ($member['name'] ?? 'Unknown') .
+                " (" . ($member['usn'] ?? '-') . ") submitted attendance for " .
+                ($event['activity_name'] ?? 'the event') .
+                ($event['tracking_id'] ? " (Event " . $event['tracking_id'] . ")" : "") .
+                ". Please confirm.";
+            foreach ($tgCodes as $tgCode) {
+                insertNotification($eventDB, $tgCode, $event_id, $title, $message, "attendance");
+            }
         }
 
         $message = "Attendance submitted for all team members and sent for approval";
@@ -235,6 +274,20 @@ try {
                 $studentId,
                 $role
             ]);
+        }
+
+        $studentStmt = $collegeDB->prepare("SELECT name, usn FROM students WHERE studid = ?");
+        $studentStmt->execute([$studentId]);
+        $student = $studentStmt->fetch(PDO::FETCH_ASSOC);
+        $tgCodes = getTGFacultyCodes($collegeDB, $studentId);
+        $title = "Attendance Submitted - " . ($student['usn'] ?? $studentId);
+        $message = "Student " . ($student['name'] ?? 'Unknown') .
+            " (" . ($student['usn'] ?? '-') . ") submitted attendance for " .
+            ($event['activity_name'] ?? 'the event') .
+            ($event['tracking_id'] ? " (Event " . $event['tracking_id'] . ")" : "") .
+            ". Please confirm.";
+        foreach ($tgCodes as $tgCode) {
+            insertNotification($eventDB, $tgCode, $event_id, $title, $message, "attendance");
         }
 
         $message = "Attendance submitted and sent to TG for verification";

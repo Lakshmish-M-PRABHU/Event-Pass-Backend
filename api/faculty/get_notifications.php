@@ -3,7 +3,7 @@ ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
 // ================= CORS =================
-$allowedOrigin = "http://localhost:5501";
+$allowedOrigin = "http://127.0.0.1:5501";
 header("Access-Control-Allow-Origin: $allowedOrigin");
 header("Access-Control-Allow-Credentials: true");
 header("Access-Control-Allow-Methods: GET, OPTIONS");
@@ -33,7 +33,7 @@ try {
         SELECT n.notification_id, n.event_id, n.title, n.message, n.type, n.created_at
         FROM notifications n
         INNER JOIN events e ON n.event_id = e.event_id
-        WHERE n.faculty_code = ? AND e.status = 'completed'
+        WHERE n.faculty_code = ?
         ORDER BY n.created_at DESC
     ");
     $stmt->execute([$facultyId]);
