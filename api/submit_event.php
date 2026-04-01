@@ -58,14 +58,24 @@ if (!$student) {
 }
 
 $financialAssistance = $_POST['financial_assistance'] ?? 'no';
-$financialPurpose = $_POST['financial_purpose'] ?? null;
-$financialAmount = $_POST['financial_amount'] ?? null;
+$financialPurposeRaw = $_POST['financial_purpose'] ?? null;
+$financialAmountRaw = $_POST['financial_amount'] ?? null;
+
+$financialPurpose = is_string($financialPurposeRaw) ? trim($financialPurposeRaw) : $financialPurposeRaw;
+$financialAmount = is_string($financialAmountRaw) ? trim($financialAmountRaw) : $financialAmountRaw;
 
 if ($financialAssistance === 'yes') {
-    if (empty($financialPurpose) || empty($financialAmount)) {
+    if ($financialPurpose === '' || $financialAmount === '' || $financialAmount === null) {
         echo json_encode(["error" => "Financial details required"]);
         exit;
     }
+    if (!is_numeric($financialAmount)) {
+        echo json_encode(["error" => "Financial amount must be numeric"]);
+        exit;
+    }
+} else {
+    $financialPurpose = null;
+    $financialAmount = null;
 }
 
 // ==============================
