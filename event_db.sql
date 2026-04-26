@@ -96,6 +96,7 @@ CREATE TABLE `events` (
   `date_to` date NOT NULL,
   `activity_level` varchar(50) NOT NULL,
   `residency` varchar(20) NOT NULL,
+  `event_type` enum('internal','external') DEFAULT 'internal',
   `event_url` varchar(255) DEFAULT NULL,
   `uploaded_file` varchar(255) DEFAULT NULL,
   `submission_date` timestamp NOT NULL DEFAULT current_timestamp(),
@@ -229,6 +230,8 @@ CREATE TABLE `event_completions` (
   `achievements` text DEFAULT NULL,
   `position` varchar(50) DEFAULT NULL,
   `rating` int(11) DEFAULT NULL,
+  `certificate_files` text DEFAULT NULL,
+  `photo_files` text DEFAULT NULL,
   `submitted_at` datetime DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 

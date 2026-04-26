@@ -27,11 +27,22 @@ if (!$eventId) {
 }
 
 $stmt = $eventDB->prepare("
-    SELECT event_id, activity_name, activity_type, date_from, date_to, status, attendance, application_type
-    FROM events
-    WHERE event_id = ? AND studid = ?
+    SELECT DISTINCT
+        e.event_id,
+        e.activity_name,
+        e.activity_type,
+        e.date_from,
+        e.date_to,
+        e.status,
+        e.attendance,
+        e.application_type
+    FROM events e
+    LEFT JOIN team_members tm ON tm.event_id = e.event_id
+    WHERE e.event_id = ?
+      AND (e.studid = ? OR tm.studid = ?)
+    LIMIT 1
 ");
-$stmt->execute([$eventId, $studentId]);
+$stmt->execute([$eventId, $studentId, $studentId]);
 $event = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$event) {
@@ -41,6 +52,7 @@ if (!$event) {
 }
 
 if (($event['application_type'] ?? '') === 'team') {
+    // Only the leader can submit completion for a team event.
     $leaderStmt = $eventDB->prepare("
         SELECT 1
         FROM team_members

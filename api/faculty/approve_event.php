@@ -20,6 +20,7 @@ if (!isset($_SESSION['faculty_code'], $_SESSION['role'])) {
 
 require "../../config/events_db.php";
 require "../../config/college_db.php";
+require_once "../../helpers/notification_service.php";
 
 function ensureTeamConsentTable(PDO $eventDB) {
     $eventDB->exec("
@@ -40,6 +41,45 @@ function ensureTeamConsentTable(PDO $eventDB) {
 $facultyId = $_SESSION['faculty_code'];
 $facultyRole = $_SESSION['role'];
 
+function getFacultyCode(PDO $collegeDB, string $role, ?string $department = null, ?string $activityType = null): ?int {
+    if ($role === 'COORDINATOR') {
+        if ($department && $activityType) {
+            $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? AND department = ? AND activity_type = ? LIMIT 1");
+            $stmt->execute([$role, $department, $activityType]);
+            $code = $stmt->fetchColumn();
+            if ($code) return (int)$code;
+        }
+        if ($department) {
+            $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? AND department = ? LIMIT 1");
+            $stmt->execute([$role, $department]);
+            $code = $stmt->fetchColumn();
+            if ($code) return (int)$code;
+        }
+        $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? LIMIT 1");
+        $stmt->execute([$role]);
+        $code = $stmt->fetchColumn();
+        return $code ? (int)$code : null;
+    }
+
+    if ($role === 'HOD') {
+        if ($department) {
+            $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? AND department = ? LIMIT 1");
+            $stmt->execute([$role, $department]);
+            $code = $stmt->fetchColumn();
+            if ($code) return (int)$code;
+        }
+        $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? LIMIT 1");
+        $stmt->execute([$role]);
+        $code = $stmt->fetchColumn();
+        return $code ? (int)$code : null;
+    }
+
+    $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? LIMIT 1");
+    $stmt->execute([$role]);
+    $code = $stmt->fetchColumn();
+    return $code ? (int)$code : null;
+}
+
 $data = json_decode(file_get_contents("php://input"), true);
 $eventId = $data['event_id'] ?? null;
 $usn = $data['usn'] ?? null;
@@ -54,9 +94,16 @@ if (!$eventId || !in_array($action, ['accept', 'reject'])) {
     exit;
 }
 
-$stmt = $eventDB->prepare("SELECT activity_type, application_type, studid FROM events WHERE event_id = ?");
+$stmt = $eventDB->prepare("SELECT activity_type, activity_name, tracking_id, application_type, studid FROM events WHERE event_id = ?");
 $stmt->execute([$eventId]);
 $event = $stmt->fetch(PDO::FETCH_ASSOC);
+
+$studentDept = null;
+if ($event) {
+    $deptStmt = $collegeDB->prepare("SELECT department FROM students WHERE studid = ? LIMIT 1");
+    $deptStmt->execute([$event['studid']]);
+    $studentDept = $deptStmt->fetchColumn() ?: null;
+}
 
 if (!$event) {
     http_response_code(404);
@@ -118,7 +165,7 @@ if ($currentIndex === false) {
 }
 
 try {
-    if ($event['application_type'] === 'team') {
+if ($event['application_type'] === 'team') {
         ensureTeamConsentTable($eventDB);
     }
     $eventDB->beginTransaction();
@@ -157,13 +204,48 @@ try {
     }
 
     if ($event['application_type'] === 'team') {
-        if ($action === 'reject') {
+    if ($action === 'reject') {
             $stmt = $eventDB->prepare("UPDATE team_member_approvals SET status = 'rejected', action_date = NOW(), faculty_code = ? WHERE event_id = ? AND member_id = ? AND role = ?");
             $stmt->execute([$facultyId, $eventId, $memberId, $facultyRole]);
 
             // Any rejection in team flow rejects the event at current role.
             $stmt = $eventDB->prepare("UPDATE events SET status = 'rejected', approval_stage = ? WHERE event_id = ?");
             $stmt->execute([$facultyRole, $eventId]);
+
+            $teamStmt = $eventDB->prepare("SELECT studid FROM team_members WHERE event_id = ?");
+            $teamStmt->execute([$eventId]);
+            $teamStudentIds = $teamStmt->fetchAll(PDO::FETCH_COLUMN);
+            foreach ($teamStudentIds as $studid) {
+                $email = app_get_student_email($collegeDB, (int)$studid);
+                if ($email) {
+                    $html = app_build_email_html(
+                        "Event rejected",
+                        [
+                            "Your team event was rejected by " . $facultyRole . "."
+                        ],
+                        [
+                            "Event ID" => $eventId,
+                            "Event Name" => $event['activity_name'] ?? '-',
+                            "Approved By" => $facultyRole,
+                            "Status" => "Rejected"
+                        ],
+                        [
+                            "text" => "Open Dashboard",
+                            "url" => "http://127.0.0.1:5501/dashboard.html"
+                        ]
+                    );
+                    $text = app_build_email_text(
+                        "Event rejected",
+                        ["Your team event was rejected by " . $facultyRole . "."],
+                        [
+                            "Event ID" => $eventId,
+                            "Event Name" => $event['activity_name'] ?? '-',
+                            "Approved By" => $facultyRole
+                        ]
+                    );
+                    app_send_email($email, "Event rejected: " . ($event['activity_name'] ?? 'Event'), $html, $text);
+                }
+            }
         } else {
             $stmt = $eventDB->prepare("UPDATE team_member_approvals SET status = 'approved', action_date = NOW(), faculty_code = ? WHERE event_id = ? AND member_id = ? AND role = ?");
             $stmt->execute([$facultyId, $eventId, $memberId, $facultyRole]);
@@ -182,9 +264,79 @@ try {
                     $nextStage = $flow[$currentIndex + 1];
                     $stmt = $eventDB->prepare("UPDATE events SET approval_stage = ? WHERE event_id = ?");
                     $stmt->execute([$nextStage, $eventId]);
+
+                    $nextFacultyCode = getFacultyCode($collegeDB, $nextStage, $studentDept, $event['activity_type'] ?? null);
+                    if ($nextFacultyCode) {
+                        app_insert_notification($eventDB, $nextFacultyCode, $eventId, "Event ready for review", "Previous stage approved. Please continue the approval flow.", "approval");
+                        $nextFacultyEmail = app_get_faculty_email($collegeDB, $nextFacultyCode);
+                        if ($nextFacultyEmail) {
+                            $nextHtml = app_build_email_html(
+                                "Event ready for review",
+                                [
+                                    "The previous approval stage has been completed.",
+                                    "Please review and confirm the next stage."
+                                ],
+                                [
+                                    "Event ID" => $eventId,
+                                    "Event Name" => $event['activity_name'] ?? '-',
+                                    "Current Stage" => $nextStage
+                                ],
+                                [
+                                    "text" => "Open Faculty Dashboard",
+                                    "url" => "http://127.0.0.1:5501/teach-dash/faculty-dashboard.html"
+                                ]
+                            );
+                            $nextText = app_build_email_text(
+                                "Event ready for review",
+                                ["The previous approval stage has been completed. Please review and confirm the next stage."],
+                                [
+                                    "Event ID" => $eventId,
+                                    "Event Name" => $event['activity_name'] ?? '-',
+                                    "Current Stage" => $nextStage
+                                ]
+                            );
+                            app_send_email($nextFacultyEmail, "Event ready for review", $nextHtml, $nextText);
+                        }
+                    }
                 } else {
                     $stmt = $eventDB->prepare("UPDATE events SET status = 'approved' WHERE event_id = ?");
                     $stmt->execute([$eventId]);
+
+                    $teamStmt = $eventDB->prepare("SELECT studid FROM team_members WHERE event_id = ?");
+                    $teamStmt->execute([$eventId]);
+                    $teamStudentIds = $teamStmt->fetchAll(PDO::FETCH_COLUMN);
+                    $studentEmail = null;
+                    if (!empty($teamStudentIds)) {
+                        foreach ($teamStudentIds as $studid) {
+                            $studentEmail = app_get_student_email($collegeDB, (int)$studid);
+                            if ($studentEmail) {
+                                $html = app_build_email_html(
+                                    "Event approved",
+                                    [
+                                        "Your team event has been fully approved."
+                                    ],
+                                    [
+                                        "Event ID" => $eventId,
+                                        "Event Name" => $event['activity_name'] ?? '-',
+                                        "Final Status" => "Approved"
+                                    ],
+                                    [
+                                        "text" => "Open Dashboard",
+                                        "url" => "http://127.0.0.1:5501/dashboard.html"
+                                    ]
+                                );
+                                $text = app_build_email_text(
+                                    "Event approved",
+                                    ["Your team event has been fully approved."],
+                                    [
+                                        "Event ID" => $eventId,
+                                        "Event Name" => $event['activity_name'] ?? '-'
+                                    ]
+                                );
+                                app_send_email($studentEmail, "Event approved: " . ($event['activity_name'] ?? 'Event'), $html, $text);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -195,17 +347,107 @@ try {
     
             $stmt = $eventDB->prepare("UPDATE events SET status = 'rejected', approval_stage = ? WHERE event_id = ?");
             $stmt->execute([$facultyRole, $eventId]);
+
+            $studentEmail = app_get_student_email($collegeDB, (int)$event['studid']);
+            if ($studentEmail) {
+                $html = app_build_email_html(
+                    "Event rejected",
+                    [
+                        "Your event was rejected by " . $facultyRole . "."
+                    ],
+                    [
+                        "Event ID" => $eventId,
+                        "Event Name" => $event['activity_name'] ?? '-',
+                        "Tracking ID" => $event['tracking_id'] ?? '-',
+                        "Approved By" => $facultyRole
+                    ],
+                    [
+                        "text" => "Open Dashboard",
+                        "url" => "http://127.0.0.1:5501/dashboard.html"
+                    ]
+                );
+                $text = app_build_email_text(
+                    "Event rejected",
+                    ["Your event was rejected by " . $facultyRole . "."],
+                    [
+                        "Event ID" => $eventId,
+                        "Event Name" => $event['activity_name'] ?? '-',
+                        "Tracking ID" => $event['tracking_id'] ?? '-',
+                        "Approved By" => $facultyRole
+                    ]
+                );
+                app_send_email($studentEmail, "Event rejected: " . ($event['activity_name'] ?? 'Event'), $html, $text);
+            }
         } else {
             $stmt = $eventDB->prepare("UPDATE event_approvals SET status = 'approved', action_date = NOW(), faculty_code = ? WHERE event_id = ? AND role = ?");
             $stmt->execute([$facultyId, $eventId, $facultyRole]);
-    
+
             if ($currentIndex < count($flow) - 1) {
                 $nextStage = $flow[$currentIndex + 1];
                 $stmt = $eventDB->prepare("UPDATE events SET approval_stage = ? WHERE event_id = ?");
                 $stmt->execute([$nextStage, $eventId]);
+
+                $nextFacultyCode = getFacultyCode($collegeDB, $nextStage, $studentDept, $event['activity_type'] ?? null);
+                if ($nextFacultyCode) {
+                    app_insert_notification($eventDB, $nextFacultyCode, $eventId, "Event ready for review", "Previous stage approved. Please continue the approval flow.", "approval");
+                    $nextFacultyEmail = app_get_faculty_email($collegeDB, $nextFacultyCode);
+                    if ($nextFacultyEmail) {
+                        $nextHtml = app_build_email_html(
+                            "Event ready for review",
+                            ["The previous approval stage has been completed."],
+                            [
+                                "Event ID" => $eventId,
+                                "Event Name" => $event['activity_name'] ?? '-',
+                                "Current Stage" => $nextStage
+                            ],
+                            [
+                                "text" => "Open Faculty Dashboard",
+                                "url" => "http://127.0.0.1:5501/teach-dash/faculty-dashboard.html"
+                            ]
+                        );
+                        $nextText = app_build_email_text(
+                            "Event ready for review",
+                            ["The previous approval stage has been completed."],
+                            [
+                                "Event ID" => $eventId,
+                                "Event Name" => $event['activity_name'] ?? '-',
+                                "Current Stage" => $nextStage
+                            ]
+                        );
+                        app_send_email($nextFacultyEmail, "Event ready for review", $nextHtml, $nextText);
+                    }
+                }
             } else {
                 $stmt = $eventDB->prepare("UPDATE events SET status = 'approved' WHERE event_id = ?");
                 $stmt->execute([$eventId]);
+
+                $studentEmail = app_get_student_email($collegeDB, (int)$event['studid']);
+                if ($studentEmail) {
+                    $html = app_build_email_html(
+                        "Event approved",
+                        [
+                            "Your event has been fully approved."
+                        ],
+                        [
+                            "Event ID" => $eventId,
+                            "Event Name" => $event['activity_name'] ?? '-',
+                            "Final Status" => "Approved"
+                        ],
+                        [
+                            "text" => "Open Dashboard",
+                            "url" => "http://127.0.0.1:5501/dashboard.html"
+                        ]
+                    );
+                    $text = app_build_email_text(
+                        "Event approved",
+                        ["Your event has been fully approved."],
+                        [
+                            "Event ID" => $eventId,
+                            "Event Name" => $event['activity_name'] ?? '-'
+                        ]
+                    );
+                    app_send_email($studentEmail, "Event approved: " . ($event['activity_name'] ?? 'Event'), $html, $text);
+                }
             }
         }
     }

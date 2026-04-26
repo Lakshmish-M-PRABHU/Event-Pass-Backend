@@ -28,6 +28,7 @@ if (!$studentId) {
 // ==============================
 require "../config/college_db.php";
 require "../config/events_db.php";
+require_once "../helpers/notification_service.php";
 
 function ensureTeamConsentTable(PDO $eventDB) {
     $eventDB->exec("
@@ -57,6 +58,47 @@ if (!$student) {
     exit;
 }
 
+function getFacultyCode(PDO $collegeDB, string $role, ?string $department = null, ?string $activityType = null): ?int {
+    if ($role === 'COORDINATOR') {
+        // Prefer matching by department + activity type, then by department, then any coordinator.
+        if ($department && $activityType) {
+            $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? AND department = ? AND activity_type = ? LIMIT 1");
+            $stmt->execute([$role, $department, $activityType]);
+            $code = $stmt->fetchColumn();
+            if ($code) return (int)$code;
+        }
+        if ($department) {
+            $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? AND department = ? LIMIT 1");
+            $stmt->execute([$role, $department]);
+            $code = $stmt->fetchColumn();
+            if ($code) return (int)$code;
+        }
+        $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? LIMIT 1");
+        $stmt->execute([$role]);
+        $code = $stmt->fetchColumn();
+        return $code ? (int)$code : null;
+    }
+
+    if ($role === 'HOD') {
+        if ($department) {
+            $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? AND department = ? LIMIT 1");
+            $stmt->execute([$role, $department]);
+            $code = $stmt->fetchColumn();
+            if ($code) return (int)$code;
+        }
+        $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? LIMIT 1");
+        $stmt->execute([$role]);
+        $code = $stmt->fetchColumn();
+        return $code ? (int)$code : null;
+    }
+
+    // DEAN / PRINCIPAL fallback: pick the first one.
+    $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? LIMIT 1");
+    $stmt->execute([$role]);
+    $code = $stmt->fetchColumn();
+    return $code ? (int)$code : null;
+}
+
 $financialAssistance = $_POST['financial_assistance'] ?? 'no';
 $financialPurposeRaw = $_POST['financial_purpose'] ?? null;
 $financialAmountRaw = $_POST['financial_amount'] ?? null;
@@ -82,6 +124,7 @@ if ($financialAssistance === 'yes') {
 // GET FORM DATA
 // ==============================
 $activity_type = $_POST['activity_type'] ?? null;
+$event_type = $_POST['event_type'] ?? null;
 $activity_name = $_POST['activity_name'] ?? null;
 $date_from = $_POST['date_from'] ?? null;
 $date_to = $_POST['date_to'] ?? null;
@@ -94,7 +137,7 @@ $application_type = $_POST['application_type'] ?? 'individual';
 $team_members = $_POST['team_members'] ?? null;
 
 // Validate required fields
-if (!$activity_type || !$activity_name || !$date_from || !$date_to || !$activity_level || !$residency) {
+if (!$event_type || !$activity_type || !$activity_name || !$date_from || !$date_to || !$activity_level || !$residency) {
     echo json_encode(["error"=>"All required fields must be filled"]);
     exit;
 }
@@ -159,19 +202,20 @@ $trackingId = "EV-" . rand(100,999);
 try {
     ensureTeamConsentTable($eventDB);
     $eventDB->beginTransaction();
+    $teamMemberContacts = [];
     
     $stmt = $eventDB->prepare("
     INSERT INTO events 
     (studid, tracking_id, activity_type, activity_name, date_from, date_to,
-     activity_level, residency, event_url, uploaded_file,
+     activity_level, residency, event_type, event_url, uploaded_file,
      financial_assistance, financial_purpose, financial_amount, status, application_type, approval_stage)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, 'TG')
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, 'TG')
     ");
 
 
     $stmt->execute([
         $studentId, $trackingId, $activity_type, $activity_name, $date_from, $date_to,
-        $activity_level, $residency, $event_url, $uploaded_file_name,   
+        $activity_level, $residency, $event_type, $event_url, $uploaded_file_name,   
         $financialAssistance, $financialPurpose, $financialAmount, $application_type
     ]);
     
@@ -182,6 +226,12 @@ try {
         $stmt = $eventDB->prepare("INSERT INTO team_members (event_id, studid, usn, name, department, is_leader) VALUES (?, ?, ?, ?, ?, 1)");
         $stmt->execute([$eventId, $studentId, $student['usn'], $student['name'], $student['department']]);
         $leaderMemberId = $eventDB->lastInsertId();
+        $teamMemberContacts[] = [
+            'studid' => (int)$studentId,
+            'name' => $student['name'],
+            'usn' => $student['usn'],
+            'is_leader' => true
+        ];
 
         $consentStmt = $eventDB->prepare("
             INSERT INTO team_member_consents (event_id, member_id, studid, consent_status, responded_at)
@@ -206,6 +256,12 @@ try {
                 $stmt = $eventDB->prepare("INSERT INTO team_members (event_id, studid, usn, name, department, is_leader) VALUES (?, ?, ?, ?, ?, 0)");
                 $stmt->execute([$eventId, $memberData['studid'], $usn, $memberData['name'], $memberData['department']]);
                 $memberId = $eventDB->lastInsertId();
+                $teamMemberContacts[] = [
+                    'studid' => (int)$memberData['studid'],
+                    'name' => $memberData['name'],
+                    'usn' => $usn,
+                    'is_leader' => false
+                ];
 
                 $consentStmt = $eventDB->prepare("
                     INSERT INTO team_member_consents (event_id, member_id, studid, consent_status)
@@ -225,21 +281,85 @@ try {
         // ==============================
         // INDIVIDUAL EVENT PROCESSING
         // ==============================
-        $roles = ['TG', 'COORDINATOR', 'HOD', 'DEAN', 'PRINCIPAL'];
-        
-        $approvalStmt = $eventDB->prepare("INSERT INTO event_approvals (event_id, role, status) VALUES (?, ?, 'pending')");
-        
-        foreach ($roles as $role) {
-            $approvalStmt->execute([$eventId, $role]);
+        // Resolve faculty_code for each approval role (required, NOT NULL).
+        $tgStmt = $collegeDB->prepare("SELECT faculty_code FROM student_tg_mapping WHERE studid = ? AND active = 1 LIMIT 1");
+        $tgStmt->execute([$studentId]);
+        $tgCode = $tgStmt->fetchColumn();
+        if (!$tgCode) {
+            throw new PDOException("No TG mapping found for student");
+        }
+
+        $roleToFaculty = [
+            'TG' => (int)$tgCode,
+            'COORDINATOR' => getFacultyCode($collegeDB, 'COORDINATOR', $student['department'], $activity_type),
+            'HOD' => getFacultyCode($collegeDB, 'HOD', $student['department'], null),
+            'DEAN' => getFacultyCode($collegeDB, 'DEAN', null, null),
+            'PRINCIPAL' => getFacultyCode($collegeDB, 'PRINCIPAL', null, null),
+        ];
+
+        foreach ($roleToFaculty as $role => $facultyCode) {
+            if (!$facultyCode) {
+                throw new PDOException("Faculty code not found for role: " . $role);
+            }
+        }
+
+        $approvalStmt = $eventDB->prepare(
+            "INSERT INTO event_approvals (event_id, faculty_code, role, status) VALUES (?, ?, ?, 'pending')"
+        );
+
+        foreach ($roleToFaculty as $role => $facultyCode) {
+            $approvalStmt->execute([$eventId, $facultyCode, $role]);
         }
     }
 
     $eventDB->commit();
+
+    if ($application_type === 'team') {
+        $subject = "Team consent request: " . $activity_name . " (" . $trackingId . ")";
+        $details = [
+            "Event Name" => $activity_name,
+            "Tracking ID" => $trackingId,
+            "Activity Type" => $activity_type,
+            "Event Type" => $event_type,
+            "Dates" => $date_from . " to " . $date_to,
+            "Level" => $activity_level,
+            "Residency" => $residency,
+            "Consent" => "Please open the Event Pass dashboard and confirm your participation."
+        ];
+        $html = app_build_email_html(
+            "Team consent required",
+            [
+                "A team event has been created and requires your consent.",
+                "Please review the event details and accept or reject participation from the dashboard."
+            ],
+            $details,
+            [
+                "text" => "Open Dashboard",
+                "url" => "http://127.0.0.1:5501/dashboard.html"
+            ]
+        );
+        $text = app_build_email_text(
+            "Team consent required",
+            [
+                "A team event has been created and requires your consent.",
+                "Please review the event details and accept or reject participation from the dashboard."
+            ],
+            $details
+        );
+
+        foreach ($teamMemberContacts as $member) {
+            $recipientEmail = app_get_student_email($collegeDB, (int)$member['studid']);
+            if ($recipientEmail) {
+                app_send_email($recipientEmail, $subject, $html, $text);
+            }
+        }
+    }
     
     echo json_encode([
     "success" => true,
     "tracking_id" => $trackingId,
-    "application_type" => $application_type
+    "application_type" => $application_type,
+    "event_type" => $event_type
     ]);
 
 

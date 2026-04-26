@@ -29,6 +29,12 @@ require "../../config/college_db.php";
 
 try {
     $roleUpper = strtoupper($role);
+    $facultyDept = null;
+    if (in_array($roleUpper, ['HOD', 'COORDINATOR'], true)) {
+        $deptStmt = $collegeDB->prepare("SELECT department FROM faculty WHERE faculty_code = ? LIMIT 1");
+        $deptStmt->execute([$facultyId]);
+        $facultyDept = $deptStmt->fetchColumn() ?: null;
+    }
     
     // Get pending attendance approvals for this faculty role
     $query = "
@@ -81,6 +87,16 @@ try {
             AND UPPER(f.activity_type) = UPPER(e.activity_type)
         )";
         $params[] = $facultyId;
+    } elseif ($roleUpper === 'HOD') {
+        $query .= " AND EXISTS (
+            SELECT 1
+            FROM team_members tm2
+            JOIN college_db.students s2 ON s2.studid = tm2.studid
+            JOIN college_db.faculty hf ON hf.faculty_code = ?
+            WHERE tm2.event_id = e.event_id
+              AND UPPER(s2.department) = UPPER(hf.department)
+        )";
+        $params[] = $facultyId;
     } else {
         // HOD, DEAN, PRINCIPAL can see all
         // No additional filter needed
@@ -95,13 +111,33 @@ try {
     // For team events, get team members info
     foreach ($approvals as &$approval) {
         if ($approval['application_type'] === 'team') {
-            $teamStmt = $eventDB->prepare("
-                SELECT tm.member_id, tm.studid, tm.usn, tm.name, tm.department, tm.is_leader
-                FROM team_members tm
-                WHERE tm.event_id = ?
-            ");
-            $teamStmt->execute([$approval['event_id']]);
-            $approval['team_members'] = $teamStmt->fetchAll(PDO::FETCH_ASSOC);
+            if ($roleUpper === 'HOD') {
+                $teamStmt = $eventDB->prepare("
+                    SELECT tm.member_id, tm.studid, tm.usn, tm.name, s2.department, tm.is_leader
+                    FROM team_members tm
+                    JOIN college_db.students s2 ON s2.studid = tm.studid
+                    JOIN college_db.faculty hf ON hf.faculty_code = ?
+                    WHERE tm.event_id = ?
+                      AND UPPER(s2.department) = UPPER(hf.department)
+                ");
+                $teamStmt->execute([$facultyId, $approval['event_id']]);
+            } else {
+                $teamStmt = $eventDB->prepare("
+                    SELECT tm.member_id, tm.studid, tm.usn, tm.name, s2.department, tm.is_leader
+                    FROM team_members tm
+                    JOIN college_db.students s2 ON s2.studid = tm.studid
+                    WHERE tm.event_id = ?
+                ");
+                $teamStmt->execute([$approval['event_id']]);
+            }
+            $teamMembers = $teamStmt->fetchAll(PDO::FETCH_ASSOC);
+            if ($roleUpper === 'HOD' && !empty($facultyDept)) {
+                $teamMembers = array_values(array_filter($teamMembers, static function ($member) use ($facultyDept) {
+                    $memberDept = strtoupper(trim((string)($member['department'] ?? '')));
+                    return $memberDept !== '' && $memberDept === strtoupper(trim((string)$facultyDept));
+                }));
+            }
+            $approval['team_members'] = $teamMembers;
         }
     }
 

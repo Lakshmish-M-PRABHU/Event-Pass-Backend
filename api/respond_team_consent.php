@@ -15,6 +15,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 session_start();
 require "../config/events_db.php";
 require "../config/college_db.php";
+require_once "../helpers/notification_service.php";
 
 function ensureTeamConsentTable(PDO $eventDB) {
     $eventDB->exec("
@@ -84,7 +85,7 @@ try {
     $eventDB->beginTransaction();
 
     $eventStmt = $eventDB->prepare("
-        SELECT event_id, application_type, status, activity_name, tracking_id
+        SELECT event_id, application_type, status, activity_name, tracking_id, studid
         FROM events
         WHERE event_id = ?
         LIMIT 1
@@ -148,6 +149,55 @@ try {
     ");
     $upsertStmt->execute([$eventId, $member['member_id'], $studentId, $status]);
 
+    $teamStmt = $eventDB->prepare("
+        SELECT tm.member_id, tm.studid, tm.usn, tm.name, tm.is_leader
+        FROM team_members tm
+        WHERE tm.event_id = ?
+        ORDER BY tm.is_leader DESC, tm.member_id ASC
+    ");
+    $teamStmt->execute([$eventId]);
+    $teamMembers = $teamStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $studentLookup = $collegeDB->prepare("SELECT name, usn FROM students WHERE studid = ? LIMIT 1");
+    $respondedBy = [];
+    $studentLookup->execute([$studentId]);
+    $respondedBy = $studentLookup->fetch(PDO::FETCH_ASSOC) ?: ['name' => 'Unknown', 'usn' => '-'];
+
+    $teamSubject = "Team consent update: " . ($event['activity_name'] ?? 'Event') . " (" . ($event['tracking_id'] ?? '-') . ")";
+    $teamDetails = [
+        "Event Name" => $event['activity_name'] ?? '-',
+        "Tracking ID" => $event['tracking_id'] ?? '-',
+        "Latest Response" => ucfirst($status) . " by " . ($respondedBy['name'] ?? 'Unknown') . " (" . ($respondedBy['usn'] ?? '-') . ")",
+        "Your Status" => ucfirst($status)
+    ];
+    $teamHtml = app_build_email_html(
+        "Team consent updated",
+        [
+            "One team member has responded to the consent request.",
+            "Please review the latest team consent status in the dashboard."
+        ],
+        $teamDetails,
+        [
+            "text" => "View Dashboard",
+            "url" => "http://127.0.0.1:5501/dashboard.html"
+        ]
+    );
+    $teamText = app_build_email_text(
+        "Team consent updated",
+        [
+            "One team member has responded to the consent request.",
+            "Please review the latest team consent status in the dashboard."
+        ],
+        $teamDetails
+    );
+
+    foreach ($teamMembers as $teamMember) {
+        $recipientEmail = app_get_student_email($collegeDB, (int)$teamMember['studid']);
+        if ($recipientEmail) {
+            app_send_email($recipientEmail, $teamSubject, $teamHtml, $teamText);
+        }
+    }
+
     if ($status === 'rejected') {
         $rejectEventStmt = $eventDB->prepare("UPDATE events SET status = 'rejected' WHERE event_id = ?");
         $rejectEventStmt->execute([$eventId]);
@@ -185,6 +235,40 @@ try {
             ". Approval can proceed.";
         foreach ($tgCodes as $tgCode) {
             insertNotification($eventDB, $tgCode, $eventId, $title, $message, "approval");
+
+            $facultyEmail = app_get_faculty_email($collegeDB, (int)$tgCode);
+            if ($facultyEmail) {
+                $facultyHtml = app_build_email_html(
+                    "Team consent completed",
+                    [
+                        "All team members have accepted participation.",
+                        "Please review and confirm the event approval flow from your dashboard."
+                    ],
+                    [
+                        "Event Name" => $event['activity_name'] ?? '-',
+                        "Tracking ID" => $event['tracking_id'] ?? '-',
+                        "Event ID" => $eventId,
+                        "Next Action" => "Confirm the event from the faculty dashboard"
+                    ],
+                    [
+                        "text" => "Open Faculty Dashboard",
+                        "url" => "http://127.0.0.1:5501/teach-dash/faculty-dashboard.html"
+                    ]
+                );
+                $facultyText = app_build_email_text(
+                    "Team consent completed",
+                    [
+                        "All team members have accepted participation.",
+                        "Please review and confirm the event approval flow from your dashboard."
+                    ],
+                    [
+                        "Event Name" => $event['activity_name'] ?? '-',
+                        "Tracking ID" => $event['tracking_id'] ?? '-',
+                        "Event ID" => $eventId
+                    ]
+                );
+                app_send_email($facultyEmail, $title, $facultyHtml, $facultyText);
+            }
         }
     }
 

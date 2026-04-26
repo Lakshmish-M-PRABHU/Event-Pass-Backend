@@ -26,9 +26,16 @@ if (!$facultyId || !$role) {
 
 require "../../config/events_db.php";
 require "../../config/college_db.php";
+require_once "../../helpers/notification_service.php";
 
 try {
     $roleUpper = strtoupper($role);
+    $facultyDept = null;
+    if (in_array($roleUpper, ['HOD', 'COORDINATOR'], true)) {
+        $deptStmt = $collegeDB->prepare("SELECT department FROM faculty WHERE faculty_code = ? LIMIT 1");
+        $deptStmt->execute([$facultyId]);
+        $facultyDept = $deptStmt->fetchColumn() ?: null;
+    }
 
     $query = "
         SELECT 
@@ -39,6 +46,8 @@ try {
             ec.position,
             ec.rating,
             ec.submitted_at,
+            ec.certificate_files,
+            ec.photo_files,
             e.tracking_id,
             e.activity_name,
             e.activity_type,
@@ -79,6 +88,18 @@ try {
             )
         ";
         $params[] = $facultyId;
+    } elseif ($roleUpper === 'HOD') {
+        $query .= "
+            AND EXISTS (
+                SELECT 1
+                FROM team_members tm2
+                JOIN college_db.students s2 ON s2.studid = tm2.studid
+                JOIN college_db.faculty hf ON hf.faculty_code = ?
+                WHERE tm2.event_id = e.event_id
+                  AND UPPER(s2.department) = UPPER(hf.department)
+            )
+        ";
+        $params[] = $facultyId;
     } else {
         // HOD, DEAN, PRINCIPAL see all completions
     }
@@ -90,15 +111,39 @@ try {
     $completions = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     foreach ($completions as &$completion) {
+        $completion['certificate_files'] = json_decode($completion['certificate_files'] ?? '[]', true) ?: [];
+        $completion['photo_files'] = json_decode($completion['photo_files'] ?? '[]', true) ?: [];
+        $completion['certificate_urls'] = array_map(
+            static fn($file) => "http://localhost/Event-Pass-Backend/uploads/completions/event_" . $completion['event_id'] . "/certificates/" . $file,
+            $completion['certificate_files']
+        );
+        $completion['photo_urls'] = array_map(
+            static fn($file) => "http://localhost/Event-Pass-Backend/uploads/completions/event_" . $completion['event_id'] . "/photos/" . $file,
+            $completion['photo_files']
+        );
+
         if (($completion['application_type'] ?? '') === 'team') {
             $teamStmt = $eventDB->prepare("
-                SELECT tm.member_id, tm.studid, tm.usn, tm.name, tm.department, tm.is_leader
+                SELECT tm.member_id, tm.studid, tm.usn, tm.name, s2.department, tm.is_leader
                 FROM team_members tm
+                JOIN college_db.students s2 ON s2.studid = tm.studid
+                JOIN college_db.faculty hf ON hf.faculty_code = ?
                 WHERE tm.event_id = ?
+                AND (
+                    ? <> 'HOD'
+                    OR UPPER(s2.department) = UPPER(hf.department)
+                )
                 ORDER BY tm.is_leader DESC, tm.member_id ASC
             ");
-            $teamStmt->execute([$completion['event_id']]);
-            $completion['team_members'] = $teamStmt->fetchAll(PDO::FETCH_ASSOC);
+            $teamStmt->execute([$facultyId, $completion['event_id'], $roleUpper]);
+            $teamMembers = $teamStmt->fetchAll(PDO::FETCH_ASSOC);
+            if ($roleUpper === 'HOD' && !empty($facultyDept)) {
+                $teamMembers = array_values(array_filter($teamMembers, static function ($member) use ($facultyDept) {
+                    $memberDept = strtoupper(trim((string)($member['department'] ?? '')));
+                    return $memberDept !== '' && $memberDept === strtoupper(trim((string)$facultyDept));
+                }));
+            }
+            $completion['team_members'] = $teamMembers;
         }
     }
 

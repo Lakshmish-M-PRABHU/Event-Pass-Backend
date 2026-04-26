@@ -46,6 +46,12 @@ function ensureTeamConsentTable(PDO $eventDB) {
 try {
     ensureTeamConsentTable($eventDB);
     $roleUpper = strtoupper($role);
+    $facultyDept = null;
+    if (in_array($roleUpper, ['HOD', 'COORDINATOR'], true)) {
+        $deptStmt = $collegeDB->prepare("SELECT department FROM faculty WHERE faculty_code = ? LIMIT 1");
+        $deptStmt->execute([$facultyId]);
+        $facultyDept = $deptStmt->fetchColumn() ?: null;
+    }
     
     $query = "
     SELECT DISTINCT
@@ -54,6 +60,7 @@ try {
         e.activity_type,
         e.date_from,
         e.date_to,
+        e.submission_date,
         e.uploaded_file,
         e.status,
         COALESCE(e.approval_stage, 'TG') AS current_stage,
@@ -97,9 +104,20 @@ try {
         $query .= " AND UPPER(e.activity_type) = (SELECT UPPER(activity_type) FROM college_db.faculty WHERE faculty_code = ?) AND UPPER(COALESCE(e.approval_stage, 'TG')) = ?";
         $params[] = $facultyId;
         $params[] = $roleUpper;
-    } elseif (in_array($roleUpper, ['HOD', 'DEAN', 'PRINCIPAL'])) {
+    } elseif ($roleUpper === 'HOD') {
+        $query .= " AND EXISTS (
+            SELECT 1
+            FROM team_members tmd
+            JOIN college_db.students ts ON ts.studid = tmd.studid
+            JOIN college_db.faculty hf ON hf.faculty_code = ?
+            WHERE tmd.event_id = e.event_id
+              AND UPPER(ts.department) = UPPER(hf.department)
+        ) AND UPPER(COALESCE(e.approval_stage, 'TG')) = ?";
+        $params[] = $facultyId;
+        $params[] = $roleUpper;
+    } elseif (in_array($roleUpper, ['DEAN', 'PRINCIPAL'])) {
         $query .= " AND UPPER(COALESCE(e.approval_stage, 'TG')) = ?";
-    $params[] = $roleUpper;
+        $params[] = $roleUpper;
     }
 
     $query .= " ORDER BY e.submission_date DESC";
@@ -116,9 +134,10 @@ try {
             if ($roleUpper === 'TG') {
                 // Show only team members mapped to this TG
                 $tmStmt = $eventDB->prepare("
-                    SELECT tm.member_id, tm.usn, tm.name, tm.studid,
+                    SELECT tm.member_id, tm.usn, tm.name, tm.studid, s.department,
                            COALESCE(tma.status, 'pending') as approval_status
                     FROM team_members tm
+                    JOIN college_db.students s ON s.studid = tm.studid
                     JOIN college_db.student_tg_mapping stm ON tm.studid = stm.studid
                     LEFT JOIN team_member_approvals tma ON tma.member_id = tm.member_id 
                         AND tma.event_id = tm.event_id 
@@ -128,12 +147,29 @@ try {
                     ORDER BY tm.is_leader DESC
                 ");
                 $tmStmt->execute([$roleUpper, $facultyId, $event['event_id'], $facultyId]);
+            } elseif ($roleUpper === 'HOD') {
+                // Show only team members from the HOD's department
+                $tmStmt = $eventDB->prepare("
+                    SELECT tm.member_id, tm.usn, tm.name, tm.studid, s2.department,
+                           COALESCE(tma.status, 'pending') as approval_status
+                    FROM team_members tm
+                    JOIN college_db.students s2 ON s2.studid = tm.studid
+                    JOIN college_db.faculty hf ON hf.faculty_code = ?
+                    LEFT JOIN team_member_approvals tma ON tma.member_id = tm.member_id 
+                        AND tma.event_id = tm.event_id 
+                        AND tma.role = ? 
+                        AND tma.faculty_code = ?
+                    WHERE tm.event_id = ? AND UPPER(s2.department) = UPPER(hf.department)
+                    ORDER BY tm.is_leader DESC
+                ");
+                $tmStmt->execute([$facultyId, $roleUpper, $facultyId, $event['event_id']]);
             } else {
                 // Show all team members for other roles
                 $tmStmt = $eventDB->prepare("
-                    SELECT tm.member_id, tm.usn, tm.name, tm.studid,
+                    SELECT tm.member_id, tm.usn, tm.name, tm.studid, s.department,
                            COALESCE(tma.status, 'pending') as approval_status
                     FROM team_members tm
+                    JOIN college_db.students s ON s.studid = tm.studid
                     LEFT JOIN team_member_approvals tma ON tma.member_id = tm.member_id 
                         AND tma.event_id = tm.event_id 
                         AND tma.role = ? 
@@ -143,7 +179,14 @@ try {
                 ");
                 $tmStmt->execute([$roleUpper, $facultyId, $event['event_id']]);
             }
-            $event['team_members'] = $tmStmt->fetchAll(PDO::FETCH_ASSOC);
+            $teamMembers = $tmStmt->fetchAll(PDO::FETCH_ASSOC);
+            if ($roleUpper === 'HOD' && !empty($facultyDept)) {
+                $teamMembers = array_values(array_filter($teamMembers, static function ($member) use ($facultyDept) {
+                    $memberDept = strtoupper(trim((string)($member['department'] ?? '')));
+                    return $memberDept !== '' && $memberDept === strtoupper(trim((string)$facultyDept));
+                }));
+            }
+            $event['team_members'] = $teamMembers;
         } else {
             // For individual events, check if this faculty has already approved
             $approvalStmt = $eventDB->prepare("
