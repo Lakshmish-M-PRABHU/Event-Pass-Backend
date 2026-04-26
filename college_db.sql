@@ -2,8 +2,8 @@
 -- version 5.2.1
 -- https://www.phpmyadmin.net/
 --
--- Host: localhost
--- Generation Time: Feb 04, 2026 at 06:47 AM
+-- Host: 127.0.0.1
+-- Generation Time: Apr 26, 2026 at 11:44 AM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.2.12
 
@@ -30,6 +30,7 @@ SET time_zone = "+00:00";
 CREATE TABLE `faculty` (
   `faculty_code` int(11) NOT NULL,
   `name` varchar(100) NOT NULL,
+  `email` varchar(255) DEFAULT NULL,
   `role` enum('TG','COORDINATOR','HOD','DEAN','PRINCIPAL') NOT NULL,
   `department` varchar(50) DEFAULT NULL,
   `activity_type` enum('Technical','Cultural','Sports','Non-Technical','Other') DEFAULT NULL,
@@ -40,16 +41,16 @@ CREATE TABLE `faculty` (
 -- Dumping data for table `faculty`
 --
 
-INSERT INTO `faculty` (`faculty_code`, `name`, `role`, `department`, `activity_type`, `created_at`) VALUES
-(1, 'Dr. Kumar', 'TG', 'CSE', NULL, '2026-01-14 09:00:21'),
-(2, 'Dr. Anitha', 'TG', 'ISE', NULL, '2026-01-14 09:00:21'),
-(3, 'Prof. Rajesh', 'COORDINATOR', 'CSE', 'Technical', '2026-01-14 09:00:21'),
-(4, 'Prof. Sunita', 'COORDINATOR', 'CSE', 'Cultural', '2026-01-14 09:00:21'),
-(5, 'Prof. Mahesh', 'COORDINATOR', 'ISE', 'Sports', '2026-01-14 09:00:21'),
-(6, 'Dr. Prakash', 'HOD', 'CSE', NULL, '2026-01-14 09:00:21'),
-(7, 'Dr. Suresh', 'HOD', 'ISE', NULL, '2026-01-14 09:00:21'),
-(8, 'Dr. Meenakshi', 'DEAN', NULL, NULL, '2026-01-14 09:00:21'),
-(9, 'Dr. Raghavan', 'PRINCIPAL', NULL, NULL, '2026-01-14 09:00:21');
+INSERT INTO `faculty` (`faculty_code`, `name`, `email`, `role`, `department`, `activity_type`, `created_at`) VALUES
+(1, 'Dr. Kumar', 'lakshmishprabhu08@gmai.com', 'TG', 'CSE', NULL, '2026-01-14 03:30:21'),
+(2, 'Dr. Anitha', 'lakshmishprabhu08@gmail.com', 'TG', 'ISE', NULL, '2026-01-14 03:30:21'),
+(3, 'Prof. Rajesh', 'lakshmishprabhu08@gmail.com', 'COORDINATOR', 'CSE', 'Technical', '2026-01-14 03:30:21'),
+(4, 'Prof. Sunita', 'lakshmishprabhu08@gmail.com', 'COORDINATOR', 'CSE', 'Cultural', '2026-01-14 03:30:21'),
+(5, 'Prof. Mahesh', 'lakshmishprabhu08@gmail.com', 'COORDINATOR', 'ISE', 'Sports', '2026-01-14 03:30:21'),
+(6, 'Dr. Prakash', 'lakshmishprabhu08@gmail.com', 'HOD', 'CSE', NULL, '2026-01-14 03:30:21'),
+(7, 'Dr. Suresh', 'lakshmishprabhu08@gmail.com', 'HOD', 'ISE', NULL, '2026-01-14 03:30:21'),
+(8, 'Dr. Meenakshi', 'lakshmishprabhu08@gmail.com', 'DEAN', NULL, NULL, '2026-01-14 03:30:21'),
+(9, 'Dr. Raghavan', 'lakshmishprabhu08@gmail.com', 'PRINCIPAL', NULL, NULL, '2026-01-14 03:30:21');
 
 -- --------------------------------------------------------
 
@@ -61,6 +62,7 @@ CREATE TABLE `students` (
   `studid` int(11) NOT NULL,
   `usn` varchar(20) NOT NULL,
   `name` varchar(100) NOT NULL,
+  `email` varchar(255) DEFAULT NULL,
   `department` varchar(50) NOT NULL,
   `semester` int(11) NOT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()
@@ -70,12 +72,12 @@ CREATE TABLE `students` (
 -- Dumping data for table `students`
 --
 
-INSERT INTO `students` (`studid`, `usn`, `name`, `department`, `semester`, `created_at`) VALUES
-(7, '1CR21CS001', 'Aarav Kumar', 'CSE', 5, '2026-01-14 09:02:04'),
-(8, '1CR21CS002', 'Diya Patel', 'CSE', 5, '2026-01-14 09:02:04'),
-(9, '1CR21CS003', 'Rohan Singh', 'CSE', 5, '2026-01-14 09:02:04'),
-(10, '1CR21CS004', 'Meera Iyer', 'ISE', 5, '2026-01-14 09:02:04'),
-(11, '1CR21CS005', 'Kunal Shah', 'ISE', 5, '2026-01-14 09:02:04');
+INSERT INTO `students` (`studid`, `usn`, `name`, `email`, `department`, `semester`, `created_at`) VALUES
+(7, '1CR21CS001', 'Aarav Kumar', 'lakshmishprabhu08@gmail.com', 'CSE', 5, '2026-01-14 09:02:04'),
+(8, '1CR21CS002', 'Diya Patel', 'lakshmishprabhu08@gmail.com', 'CSE', 5, '2026-01-14 09:02:04'),
+(9, '1CR21CS003', 'Rohan Singh', 'lakshmishprabhu08@gmail.com', 'CSE', 5, '2026-01-14 09:02:04'),
+(10, '1CR21CS004', 'Meera Iyer', 'lakshmishprabhu08@gmail.com', 'ISE', 5, '2026-01-14 09:02:04'),
+(11, '1CR21CS005', 'Kunal Shah', 'lakshmishprabhu08@gmail.com', 'ISE', 5, '2026-01-14 09:02:04');
 
 -- --------------------------------------------------------
 
@@ -121,45 +123,14 @@ ALTER TABLE `students`
   ADD UNIQUE KEY `usn` (`usn`);
 
 --
--- Indexes for table `student_tg_mapping`
---
-ALTER TABLE `student_tg_mapping`
-  ADD PRIMARY KEY (`id`),
-  ADD KEY `student_id` (`studid`),
-  ADD KEY `faculty_id` (`faculty_code`);
-
---
 -- AUTO_INCREMENT for dumped tables
 --
-
---
--- AUTO_INCREMENT for table `faculty`
---
-ALTER TABLE `faculty`
-  MODIFY `faculty_code` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=10;
 
 --
 -- AUTO_INCREMENT for table `students`
 --
 ALTER TABLE `students`
   MODIFY `studid` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=12;
-
---
--- AUTO_INCREMENT for table `student_tg_mapping`
---
-ALTER TABLE `student_tg_mapping`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=11;
-
---
--- Constraints for dumped tables
---
-
---
--- Constraints for table `student_tg_mapping`
---
-ALTER TABLE `student_tg_mapping`
-  ADD CONSTRAINT `student_tg_mapping_ibfk_1` FOREIGN KEY (`studid`) REFERENCES `students` (`studid`),
-  ADD CONSTRAINT `student_tg_mapping_ibfk_2` FOREIGN KEY (`faculty_code`) REFERENCES `faculty` (`faculty_code`);
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
