@@ -134,7 +134,7 @@ try {
             if ($roleUpper === 'TG') {
                 // Show only team members mapped to this TG
                 $tmStmt = $eventDB->prepare("
-                    SELECT tm.member_id, tm.usn, tm.name, tm.studid, s.department,
+                    SELECT tm.member_id, tm.usn, tm.name, tm.studid, s.department, tm.is_leader,
                            COALESCE(tma.status, 'pending') as approval_status
                     FROM team_members tm
                     JOIN college_db.students s ON s.studid = tm.studid
@@ -150,7 +150,7 @@ try {
             } elseif ($roleUpper === 'HOD') {
                 // Show only team members from the HOD's department
                 $tmStmt = $eventDB->prepare("
-                    SELECT tm.member_id, tm.usn, tm.name, tm.studid, s2.department,
+                    SELECT tm.member_id, tm.usn, tm.name, tm.studid, s2.department, tm.is_leader,
                            COALESCE(tma.status, 'pending') as approval_status
                     FROM team_members tm
                     JOIN college_db.students s2 ON s2.studid = tm.studid
@@ -166,7 +166,7 @@ try {
             } else {
                 // Show all team members for other roles
                 $tmStmt = $eventDB->prepare("
-                    SELECT tm.member_id, tm.usn, tm.name, tm.studid, s.department,
+                    SELECT tm.member_id, tm.usn, tm.name, tm.studid, s.department, tm.is_leader,
                            COALESCE(tma.status, 'pending') as approval_status
                     FROM team_members tm
                     JOIN college_db.students s ON s.studid = tm.studid
@@ -180,6 +180,11 @@ try {
                 $tmStmt->execute([$roleUpper, $facultyId, $event['event_id']]);
             }
             $teamMembers = $tmStmt->fetchAll(PDO::FETCH_ASSOC);
+            // Keep the leader separate from the member list so the UI does not
+            // show the same student twice in team details.
+            $teamMembers = array_values(array_filter($teamMembers, static function ($member) {
+                return (int)($member['is_leader'] ?? 0) !== 1;
+            }));
             if ($roleUpper === 'HOD' && !empty($facultyDept)) {
                 $teamMembers = array_values(array_filter($teamMembers, static function ($member) use ($facultyDept) {
                     $memberDept = strtoupper(trim((string)($member['department'] ?? '')));

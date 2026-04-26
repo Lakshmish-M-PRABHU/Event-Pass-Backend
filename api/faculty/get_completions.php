@@ -129,6 +129,7 @@ try {
                 JOIN college_db.students s2 ON s2.studid = tm.studid
                 JOIN college_db.faculty hf ON hf.faculty_code = ?
                 WHERE tm.event_id = ?
+                AND tm.is_leader = 0
                 AND (
                     ? <> 'HOD'
                     OR UPPER(s2.department) = UPPER(hf.department)
@@ -137,12 +138,6 @@ try {
             ");
             $teamStmt->execute([$facultyId, $completion['event_id'], $roleUpper]);
             $teamMembers = $teamStmt->fetchAll(PDO::FETCH_ASSOC);
-            if ($roleUpper === 'HOD' && !empty($facultyDept)) {
-                $teamMembers = array_values(array_filter($teamMembers, static function ($member) use ($facultyDept) {
-                    $memberDept = strtoupper(trim((string)($member['department'] ?? '')));
-                    return $memberDept !== '' && $memberDept === strtoupper(trim((string)$facultyDept));
-                }));
-            }
             $completion['team_members'] = $teamMembers;
         }
     }
