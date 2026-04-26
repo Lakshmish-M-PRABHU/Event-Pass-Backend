@@ -3,7 +3,7 @@ ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
 header("Content-Type: application/json");
-header("Access-Control-Allow-Origin: http://127.0.0.1:5501");
+header("Access-Control-Allow-Origin: http://localhost:5501");
 header("Access-Control-Allow-Credentials: true");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type");
@@ -179,7 +179,7 @@ try {
         $teamDetails,
         [
             "text" => "View Dashboard",
-            "url" => "http://127.0.0.1:5501/dashboard.html"
+            "url" => "http://localhost:5501/dashboard.html"
         ]
     );
     $teamText = app_build_email_text(
@@ -252,7 +252,7 @@ try {
                     ],
                     [
                         "text" => "Open Faculty Dashboard",
-                        "url" => "http://127.0.0.1:5501/teach-dash/faculty-dashboard.html"
+                        "url" => "http://localhost:5501/teach-dash/faculty-dashboard.html"
                     ]
                 );
                 $facultyText = app_build_email_text(

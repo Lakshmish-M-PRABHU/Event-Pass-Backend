@@ -1,6 +1,6 @@
 <?php
 
-header("Access-Control-Allow-Origin: http://127.0.0.1:5501");
+header("Access-Control-Allow-Origin: http://localhost:5501");
 header("Access-Control-Allow-Credentials: true");
 header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type");
@@ -12,7 +12,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 session_start();
 header("Content-Type: application/json");
 
-$conn = new mysqli("127.0.0.1", "root", "", "college_db");
+$conn = new mysqli("localhost", "root", "", "college_db");
 
 $data = json_decode(file_get_contents("php://input"), true);
 $usn = $data['usn'] ?? null;

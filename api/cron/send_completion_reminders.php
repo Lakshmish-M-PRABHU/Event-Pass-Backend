@@ -46,7 +46,7 @@ try {
             $details,
             [
                 "text" => "Open Dashboard",
-                "url" => "http://127.0.0.1:5501/dashboard.html"
+                "url" => "http://localhost:5501/dashboard.html"
             ]
         );
         $text = app_build_email_text(
