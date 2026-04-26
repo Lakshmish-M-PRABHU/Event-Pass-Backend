@@ -3,7 +3,7 @@ ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
 // ================= CORS =================
-$allowedOrigin = "http://127.0.0.1:5501";
+$allowedOrigin = "http://localhost:5501";
 header("Access-Control-Allow-Origin: $allowedOrigin");
 header("Access-Control-Allow-Credentials: true");
 header("Access-Control-Allow-Methods: GET, OPTIONS");

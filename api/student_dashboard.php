@@ -3,7 +3,7 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-header("Access-Control-Allow-Origin: http://127.0.0.1:5501");
+header("Access-Control-Allow-Origin: http://localhost:5501");
 header("Access-Control-Allow-Credentials: true");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type");
@@ -28,14 +28,14 @@ $student = $s->fetch(PDO::FETCH_ASSOC);
 $statsQ = $eventDB->prepare("
   SELECT 
     COUNT(DISTINCT e.event_id) total,
-    SUM(e.status='approved') approved,
-    SUM(e.status='pending') pending,
-    SUM(CASE WHEN e.studid = ? AND e.status='completed' THEN 1 ELSE 0 END) completed
+    COUNT(DISTINCT CASE WHEN e.status = 'approved' THEN e.event_id END) approved,
+    COUNT(DISTINCT CASE WHEN e.status = 'pending' THEN e.event_id END) pending,
+    COUNT(DISTINCT CASE WHEN e.status = 'completed' THEN e.event_id END) completed
   FROM events e
   LEFT JOIN team_members tm ON e.event_id = tm.event_id
   WHERE e.studid=? OR tm.studid=?
 ");
-$statsQ->execute([$studentId, $studentId, $studentId]);
+$statsQ->execute([$studentId, $studentId]);
 $stats = $statsQ->fetch(PDO::FETCH_ASSOC);
 
 // Applications - events where student is leader OR team member

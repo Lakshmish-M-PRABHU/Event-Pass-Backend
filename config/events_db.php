@@ -33,14 +33,14 @@ if (file_exists($envPath)) {
   }
 }
 
-$dbUrl = getenv("EVENT_DB_URL") ?: "mysql://root:@127.0.0.1:3306/event_db";
+$dbUrl = getenv("EVENT_DB_URL") ?: "mysql://root:@localhost:3306/event_db";
 
 $parts = parse_url($dbUrl);
 if ($parts === false) {
   throw new Exception("Invalid EVENT_DB_URL");
 }
 
-$host = $parts["host"] ?? "127.0.0.1";
+$host = $parts["host"] ?? "localhost";
 $port = $parts["port"] ?? 3306;
 $user = $parts["user"] ?? "root";
 $pass = $parts["pass"] ?? "";

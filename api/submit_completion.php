@@ -3,7 +3,7 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-header("Access-Control-Allow-Origin: http://127.0.0.1:5501");
+header("Access-Control-Allow-Origin: http://localhost:5501");
 header("Access-Control-Allow-Credentials: true");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type");
@@ -12,6 +12,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') exit(0);
 session_start();
 require "../config/events_db.php";
 require "../config/college_db.php";
+require_once "../helpers/notification_service.php";
 
 header("Content-Type: application/json");
 
@@ -88,9 +89,9 @@ if (!$attendance || !$attendedYes || (($attendance['final_status'] ?? '') === 'r
     exit;
 }
 
-$stmt = $eventDB->prepare("
-    SELECT completion_id FROM event_completions WHERE event_id = ?
-");
+app_ensure_completion_attachment_columns($eventDB);
+
+$stmt = $eventDB->prepare("SELECT completion_id FROM event_completions WHERE event_id = ?");
 $stmt->execute([$eventId]);
 
 if ($stmt->fetch()) {
@@ -99,12 +100,39 @@ if ($stmt->fetch()) {
     exit;
 }
 
+// Store uploaded completion assets
+$completionBaseDir = "../uploads/completions/event_" . $eventId . "/";
+$certificateFiles = [];
+$photoFiles = [];
+
+if (isset($_FILES['certificates'])) {
+    $certificateFiles = app_collect_file_uploads($_FILES['certificates'], $completionBaseDir . "certificates", ['pdf', 'jpg', 'jpeg', 'png'], 10);
+}
+
+if (isset($_FILES['photos'])) {
+    $photoFiles = app_collect_file_uploads($_FILES['photos'], $completionBaseDir . "photos", ['jpg', 'jpeg', 'png'], 3);
+}
+
+if (empty($photoFiles)) {
+    http_response_code(400);
+    echo json_encode(["error" => "At least one event photo is required"]);
+    exit;
+}
+
 /* Save completion */
 $stmt = $eventDB->prepare("
-    INSERT INTO event_completions (event_id, experience, achievements, position, rating)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO event_completions (event_id, experience, achievements, position, rating, certificate_files, photo_files)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
 ");
-$stmt->execute([$eventId, $experience, $achievements, $position, $rating]);
+$stmt->execute([
+    $eventId,
+    $experience,
+    $achievements,
+    $position,
+    $rating,
+    json_encode($certificateFiles),
+    json_encode($photoFiles)
+]);
 
 /* Mark event completed */
 $stmt = $eventDB->prepare("
@@ -114,6 +142,46 @@ $stmt = $eventDB->prepare("
     WHERE event_id = ?
 ");
 $stmt->execute([$eventId]);
+
+function getFacultyCode(PDO $collegeDB, string $role, ?string $department = null, ?string $activityType = null): ?int {
+    if ($role === 'COORDINATOR') {
+        if ($department && $activityType) {
+            $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? AND department = ? AND activity_type = ? LIMIT 1");
+            $stmt->execute([$role, $department, $activityType]);
+            $code = $stmt->fetchColumn();
+            if ($code) return (int)$code;
+        }
+        if ($department) {
+            $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? AND department = ? LIMIT 1");
+            $stmt->execute([$role, $department]);
+            $code = $stmt->fetchColumn();
+            if ($code) return (int)$code;
+        }
+        $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? LIMIT 1");
+        $stmt->execute([$role]);
+        $code = $stmt->fetchColumn();
+        return $code ? (int)$code : null;
+    }
+
+    if ($role === 'HOD') {
+        if ($department) {
+            $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? AND department = ? LIMIT 1");
+            $stmt->execute([$role, $department]);
+            $code = $stmt->fetchColumn();
+            if ($code) return (int)$code;
+        }
+        $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? LIMIT 1");
+        $stmt->execute([$role]);
+        $code = $stmt->fetchColumn();
+        return $code ? (int)$code : null;
+    }
+
+    $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? LIMIT 1");
+    $stmt->execute([$role]);
+    $code = $stmt->fetchColumn();
+    return $code ? (int)$code : null;
+}
+
 function getTGFacultyCodes(PDO $collegeDB, array $studentIds) {
     if (empty($studentIds)) return [];
     $placeholders = implode(',', array_fill(0, count($studentIds), '?'));
@@ -146,18 +214,37 @@ function insertNotification(PDO $eventDB, $facultyCode, $eventId, $title, $messa
 
 try {
     $studentIds = [$studentId];
+    $teamMembers = [];
+    $leaderInfo = null;
+    $activityType = $event['activity_type'] ?? null;
+
+    $studentStmt = $collegeDB->prepare("SELECT studid, name, usn, department FROM students WHERE studid = ? LIMIT 1");
+    $studentStmt->execute([$studentId]);
+    $leaderInfo = $studentStmt->fetch(PDO::FETCH_ASSOC) ?: null;
 
     if (($event['application_type'] ?? '') === 'team') {
         $teamStmt = $eventDB->prepare("
-            SELECT studid
+            SELECT tm.studid, tm.usn, tm.name, tm.department, tm.is_leader
             FROM team_members
             WHERE event_id = ?
         ");
         $teamStmt->execute([$eventId]);
-        $studentIds = $teamStmt->fetchAll(PDO::FETCH_COLUMN);
+        $teamMembers = $teamStmt->fetchAll(PDO::FETCH_ASSOC);
+        $studentIds = array_map(static fn($member) => (int)$member['studid'], $teamMembers);
+        foreach ($teamMembers as $member) {
+            if (!empty($member['is_leader'])) {
+                $leaderInfo = $member;
+                break;
+            }
+        }
     }
 
     $tgCodes = getTGFacultyCodes($collegeDB, $studentIds);
+    $coordinatorCode = null;
+    if ($leaderInfo) {
+        $coordinatorCode = getFacultyCode($collegeDB, 'COORDINATOR', $leaderInfo['department'] ?? null, $activityType);
+    }
+
     $title = "Completion Submitted";
     $message = "Completion submitted for " .
         ($event['activity_name'] ?? 'the event') .
@@ -166,6 +253,106 @@ try {
 
     foreach ($tgCodes as $tgCode) {
         insertNotification($eventDB, $tgCode, $eventId, $title, $message, "completion");
+
+        $facultyEmail = app_get_faculty_email($collegeDB, (int)$tgCode);
+        if ($facultyEmail) {
+            $facultyHtml = app_build_email_html(
+                "Completion submitted",
+                [
+                    "A completion form has been submitted and is ready for review.",
+                    "The submission includes the experience summary, achievements, and uploaded evidence."
+                ],
+                [
+                    "Event Name" => $event['activity_name'] ?? '-',
+                    "Tracking ID" => $event['tracking_id'] ?? '-',
+                    "Event ID" => $eventId,
+                    "Submitted By" => $leaderInfo['name'] ?? 'Team Leader',
+                    "Photo Count" => count($photoFiles),
+                    "Certificate Count" => count($certificateFiles)
+                ],
+                [
+                    "text" => "Open Faculty Dashboard",
+                    "url" => "http://localhost:5501/teach-dash/faculty-dashboard.html"
+                ]
+            );
+            $facultyText = app_build_email_text(
+                "Completion submitted",
+                [
+                    "A completion form has been submitted and is ready for review.",
+                    "The submission includes the experience summary, achievements, and uploaded evidence."
+                ],
+                [
+                    "Event Name" => $event['activity_name'] ?? '-',
+                    "Tracking ID" => $event['tracking_id'] ?? '-',
+                    "Event ID" => $eventId
+                ]
+            );
+            app_send_email($facultyEmail, $title, $facultyHtml, $facultyText);
+        }
+    }
+
+    if ($coordinatorCode) {
+        app_insert_notification($eventDB, $coordinatorCode, $eventId, $title, $message, "completion");
+        $coordinatorEmail = app_get_faculty_email($collegeDB, $coordinatorCode);
+        if ($coordinatorEmail) {
+            $coordinatorHtml = app_build_email_html(
+                "Completion submitted",
+                [
+                    "A completion form has been submitted and is ready for your review."
+                ],
+                [
+                    "Event Name" => $event['activity_name'] ?? '-',
+                    "Tracking ID" => $event['tracking_id'] ?? '-',
+                    "Event ID" => $eventId
+                ],
+                [
+                    "text" => "Open Faculty Dashboard",
+                    "url" => "http://localhost:5501/teach-dash/faculty-dashboard.html"
+                ]
+            );
+            $coordinatorText = app_build_email_text(
+                "Completion submitted",
+                ["A completion form has been submitted and is ready for your review."],
+                [
+                    "Event Name" => $event['activity_name'] ?? '-',
+                    "Tracking ID" => $event['tracking_id'] ?? '-',
+                    "Event ID" => $eventId
+                ]
+            );
+            app_send_email($coordinatorEmail, $title, $coordinatorHtml, $coordinatorText);
+        }
+    }
+
+    foreach ($teamMembers as $member) {
+        $memberEmail = app_get_student_email($collegeDB, (int)$member['studid']);
+        if ($memberEmail) {
+            $memberHtml = app_build_email_html(
+                "Team completion submitted",
+                [
+                    "Your team leader has submitted the completion form for the event."
+                ],
+                [
+                    "Event Name" => $event['activity_name'] ?? '-',
+                    "Tracking ID" => $event['tracking_id'] ?? '-',
+                    "Event ID" => $eventId,
+                    "Leader" => $leaderInfo['name'] ?? '-'
+                ],
+                [
+                    "text" => "View Dashboard",
+                    "url" => "http://localhost:5501/dashboard.html"
+                ]
+            );
+            $memberText = app_build_email_text(
+                "Team completion submitted",
+                ["Your team leader has submitted the completion form for the event."],
+                [
+                    "Event Name" => $event['activity_name'] ?? '-',
+                    "Tracking ID" => $event['tracking_id'] ?? '-',
+                    "Event ID" => $eventId
+                ]
+            );
+            app_send_email($memberEmail, "Team completion submitted: " . ($event['activity_name'] ?? 'Event'), $memberHtml, $memberText);
+        }
     }
 } catch (Exception $e) {
     // Notifications are best-effort; do not block completion success.

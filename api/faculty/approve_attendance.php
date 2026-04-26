@@ -3,7 +3,7 @@ ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
 header("Content-Type: application/json");
-header("Access-Control-Allow-Origin: http://127.0.0.1:5501");
+header("Access-Control-Allow-Origin: http://localhost:5501");
 header("Access-Control-Allow-Credentials: true");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type");
@@ -20,9 +20,49 @@ if (!isset($_SESSION['faculty_code'], $_SESSION['role'])) {
 
 require "../../config/events_db.php";
 require "../../config/college_db.php";
+require_once "../../helpers/notification_service.php";
 
 $facultyId = $_SESSION['faculty_code'];
 $facultyRole = strtoupper($_SESSION['role']);
+
+function getFacultyCode(PDO $collegeDB, string $role, ?string $department = null, ?string $activityType = null): ?int {
+    if ($role === 'COORDINATOR') {
+        if ($department && $activityType) {
+            $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? AND department = ? AND activity_type = ? LIMIT 1");
+            $stmt->execute([$role, $department, $activityType]);
+            $code = $stmt->fetchColumn();
+            if ($code) return (int)$code;
+        }
+        if ($department) {
+            $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? AND department = ? LIMIT 1");
+            $stmt->execute([$role, $department]);
+            $code = $stmt->fetchColumn();
+            if ($code) return (int)$code;
+        }
+        $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? LIMIT 1");
+        $stmt->execute([$role]);
+        $code = $stmt->fetchColumn();
+        return $code ? (int)$code : null;
+    }
+
+    if ($role === 'HOD') {
+        if ($department) {
+            $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? AND department = ? LIMIT 1");
+            $stmt->execute([$role, $department]);
+            $code = $stmt->fetchColumn();
+            if ($code) return (int)$code;
+        }
+        $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? LIMIT 1");
+        $stmt->execute([$role]);
+        $code = $stmt->fetchColumn();
+        return $code ? (int)$code : null;
+    }
+
+    $stmt = $collegeDB->prepare("SELECT faculty_code FROM faculty WHERE role = ? LIMIT 1");
+    $stmt->execute([$role]);
+    $code = $stmt->fetchColumn();
+    return $code ? (int)$code : null;
+}
 
 $data = json_decode(file_get_contents("php://input"), true);
 $attendanceId = $data['attendance_id'] ?? null;
@@ -46,7 +86,8 @@ try {
             a.studid,
             a.current_stage,
             a.final_status,
-            e.application_type
+            e.application_type,
+            e.activity_type
         FROM attendance a
         JOIN events e ON e.event_id = a.event_id
         JOIN attendance_approvals aa ON aa.attendance_id = a.attendance_id
@@ -131,6 +172,55 @@ try {
         $stmt->execute([$facultyRole, $attendanceId]);
 
         $eventDB->commit();
+
+        $studentStmt = $collegeDB->prepare("SELECT name, usn, department FROM students WHERE studid = ? LIMIT 1");
+        $studentStmt->execute([$attendance['studid']]);
+        $student = $studentStmt->fetch(PDO::FETCH_ASSOC) ?: ['name' => 'Student', 'usn' => '-', 'department' => null];
+
+        $subject = "Attendance rejected: " . ($event['activity_name'] ?? 'Event');
+        $details = [
+            "Event ID" => $attendance['event_id'],
+            "Student" => ($student['name'] ?? 'Student') . " (" . ($student['usn'] ?? '-') . ")",
+            "Approved By" => $facultyRole,
+            "Status" => "Rejected"
+        ];
+        $studentHtml = app_build_email_html(
+            "Attendance rejected",
+            [
+                "Your attendance was rejected by " . $facultyRole . ".",
+                "Please review the dashboard for the latest status."
+            ],
+            $details,
+            [
+                "text" => "Open Dashboard",
+                "url" => "http://localhost:5501/dashboard.html"
+            ]
+        );
+        $studentText = app_build_email_text(
+            "Attendance rejected",
+            [
+                "Your attendance was rejected by " . $facultyRole . ".",
+                "Please review the dashboard for the latest status."
+            ],
+            $details
+        );
+
+        $studentEmail = app_get_student_email($collegeDB, (int)$attendance['studid']);
+        if ($studentEmail) {
+            app_send_email($studentEmail, $subject, $studentHtml, $studentText);
+        }
+
+        if ($attendance['application_type'] === 'team') {
+            $teamStmt = $eventDB->prepare("SELECT studid FROM team_members WHERE event_id = ?");
+            $teamStmt->execute([$attendance['event_id']]);
+            foreach ($teamStmt->fetchAll(PDO::FETCH_COLUMN) as $teamStudid) {
+                $teamEmail = app_get_student_email($collegeDB, (int)$teamStudid);
+                if ($teamEmail) {
+                    app_send_email($teamEmail, $subject, $studentHtml, $studentText);
+                }
+            }
+        }
+
         echo json_encode([
             "success" => true,
             "message" => "Attendance rejected"
@@ -161,6 +251,77 @@ try {
         $stmt->execute([$nextRole, $attendanceId]);
         
         $message = "Attendance approved and forwarded to " . $nextRole;
+
+        $studentStmt = $collegeDB->prepare("SELECT name, usn, department FROM students WHERE studid = ? LIMIT 1");
+        $studentStmt->execute([$attendance['studid']]);
+        $student = $studentStmt->fetch(PDO::FETCH_ASSOC) ?: ['name' => 'Student', 'usn' => '-', 'department' => null];
+        $studentEmail = app_get_student_email($collegeDB, (int)$attendance['studid']);
+
+        $studentDetails = [
+            "Event ID" => $attendance['event_id'],
+            "Student" => ($student['name'] ?? 'Student') . " (" . ($student['usn'] ?? '-') . ")",
+            "Approved By" => $facultyRole,
+            "Next Step" => $nextRole,
+            "Status" => "Approved"
+        ];
+        $studentHtml = app_build_email_html(
+            "Attendance approved",
+            [
+                "Your attendance was approved by " . $facultyRole . ".",
+                "It has now been forwarded to " . $nextRole . "."
+            ],
+            $studentDetails,
+            [
+                "text" => "Open Dashboard",
+                "url" => "http://localhost:5501/dashboard.html"
+            ]
+        );
+        $studentText = app_build_email_text(
+            "Attendance approved",
+            [
+                "Your attendance was approved by " . $facultyRole . ".",
+                "It has now been forwarded to " . $nextRole . "."
+            ],
+            $studentDetails
+        );
+
+        if ($studentEmail) {
+            app_send_email($studentEmail, "Attendance approved: " . ($attendance['event_id'] ?? 'Event'), $studentHtml, $studentText);
+        }
+
+        $nextFacultyCode = getFacultyCode($collegeDB, $nextRole, $student['department'] ?? null, $attendance['activity_type'] ?? null);
+        if ($nextFacultyCode) {
+            app_insert_notification($eventDB, $nextFacultyCode, (int)$attendance['event_id'], "Attendance ready for review", "Attendance approved by {$facultyRole}. Please confirm the next stage.", "attendance");
+            $nextFacultyEmail = app_get_faculty_email($collegeDB, $nextFacultyCode);
+            if ($nextFacultyEmail) {
+                $nextFacultyHtml = app_build_email_html(
+                    "Attendance ready for review",
+                    [
+                        "Attendance has been approved by " . $facultyRole . " and is ready for your review."
+                    ],
+                    [
+                        "Event ID" => $attendance['event_id'],
+                        "Student" => ($student['name'] ?? 'Student') . " (" . ($student['usn'] ?? '-') . ")",
+                        "Next Stage" => $nextRole
+                    ],
+                    [
+                        "text" => "Open Faculty Dashboard",
+                        "url" => "http://localhost:5501/teach-dash/faculty-dashboard.html"
+                    ]
+                );
+                $nextFacultyText = app_build_email_text(
+                    "Attendance ready for review",
+                    [
+                        "Attendance has been approved by " . $facultyRole . " and is ready for your review."
+                    ],
+                    [
+                        "Event ID" => $attendance['event_id'],
+                        "Student" => ($student['name'] ?? 'Student') . " (" . ($student['usn'] ?? '-') . ")"
+                    ]
+                );
+                app_send_email($nextFacultyEmail, "Attendance ready for review", $nextFacultyHtml, $nextFacultyText);
+            }
+        }
     } else {
         // Last stage - mark as verified
         $stmt = $eventDB->prepare("
@@ -180,6 +341,49 @@ try {
         $stmt->execute([$attendance['event_id']]);
         
         $message = "Attendance verified and completed";
+
+        $studentStmt = $collegeDB->prepare("SELECT name, usn FROM students WHERE studid = ? LIMIT 1");
+        $studentStmt->execute([$attendance['studid']]);
+        $student = $studentStmt->fetch(PDO::FETCH_ASSOC) ?: ['name' => 'Student', 'usn' => '-'];
+        $studentEmail = app_get_student_email($collegeDB, (int)$attendance['studid']);
+        $finalHtml = app_build_email_html(
+            "Attendance confirmed",
+            [
+                "Your attendance has been fully verified and accepted."
+            ],
+            [
+                "Event ID" => $attendance['event_id'],
+                "Student" => ($student['name'] ?? 'Student') . " (" . ($student['usn'] ?? '-') . ")",
+                "Final Status" => "Verified"
+            ],
+            [
+                "text" => "Open Dashboard",
+                "url" => "http://localhost:5501/dashboard.html"
+            ]
+        );
+        $finalText = app_build_email_text(
+            "Attendance confirmed",
+            ["Your attendance has been fully verified and accepted."],
+            [
+                "Event ID" => $attendance['event_id'],
+                "Student" => ($student['name'] ?? 'Student') . " (" . ($student['usn'] ?? '-') . ")",
+                "Final Status" => "Verified"
+            ]
+        );
+        if ($studentEmail) {
+            app_send_email($studentEmail, "Attendance confirmed", $finalHtml, $finalText);
+        }
+
+        if ($attendance['application_type'] === 'team') {
+            $teamStmt = $eventDB->prepare("SELECT studid FROM team_members WHERE event_id = ?");
+            $teamStmt->execute([$attendance['event_id']]);
+            foreach ($teamStmt->fetchAll(PDO::FETCH_COLUMN) as $teamStudid) {
+                $teamEmail = app_get_student_email($collegeDB, (int)$teamStudid);
+                if ($teamEmail) {
+                    app_send_email($teamEmail, "Attendance confirmed", $finalHtml, $finalText);
+                }
+            }
+        }
     }
 
     $eventDB->commit();
