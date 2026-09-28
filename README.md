@@ -89,7 +89,7 @@ Event-Pass-Backend/
    - `college_db.sql`
    - `event_db.sql`
 5. Make sure the frontend is allowed by CORS.
-   - The current backend headers allow `http://localhost:5501`.
+   - The current backend headers allow `http://localhost:5500`.
 
 ## Optional Environment Variables
 
